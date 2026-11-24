@@ -585,36 +585,55 @@
             const code = params.get('code');
             const state = params.get('state');
 
-            console.log('OAuth callback params:', { code: code ? 'present' : 'missing', state: state ? 'present' : 'missing' });
+            console.log('OAuth callback params:', { code: code ? code.substring(0, 20) + '...' : 'missing', state: state ? state.substring(0, 20) + '...' : 'missing' });
 
-            if (code && state) {
-                try {
-                    const callbackUrl = `${API_BASE}/auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
-                    console.log('Calling backend callback endpoint...');
-                    
-                    const response = await fetch(callbackUrl);
-                    const data = await response.json();
-                    
-                    console.log('Backend response:', data);
-                    
-                    if (data.session_token) {
-                        sessionToken = data.session_token;
-                        localStorage.setItem('sessionToken', sessionToken);
-                        currentUser = data.user;
-                        console.log('OAuth successful, cleaning URL and initializing...');
-                        window.history.replaceState({}, document.title, '/auth.html');
-                        await loadUserProfile();
-                        await loadTasks();
-                    } else if (data.error) {
-                        console.error('Backend error:', data.message);
-                        alert('Authentication failed: ' + data.message);
-                    }
-                } catch (error) {
-                    console.error('OAuth callback failed:', error);
-                    alert('Authentication failed: ' + error.message);
-                }
-            } else {
+            if (!code || !state) {
                 console.log('No OAuth params in URL, checking for existing session...');
+                return;
+            }
+
+            // Prevent duplicate processing
+            if (window.oauthProcessing) {
+                console.log('OAuth callback already processing, skipping...');
+                return;
+            }
+            window.oauthProcessing = true;
+
+            try {
+                const callbackUrl = `${API_BASE}/auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+                console.log('Calling backend callback endpoint...');
+                
+                const response = await fetch(callbackUrl);
+                const data = await response.json();
+                
+                console.log('Backend response status:', response.status);
+                console.log('Backend response:', data);
+                
+                // Clear URL immediately after getting response
+                window.history.replaceState({}, document.title, '/auth.html');
+                
+                if (response.ok && data.session_token) {
+                    sessionToken = data.session_token;
+                    localStorage.setItem('sessionToken', sessionToken);
+                    currentUser = data.user;
+                    console.log('✅ OAuth successful!');
+                    await loadUserProfile();
+                    await loadTasks();
+                } else if (data.error) {
+                    console.error('❌ Backend error:', data.message);
+                    alert('Authentication failed: ' + data.message);
+                    init();  // Fall back to sign-in screen
+                } else {
+                    console.error('❌ Unexpected response:', data);
+                    alert('Authentication failed: Unexpected response from server');
+                    init();
+                }
+            } catch (error) {
+                console.error('❌ OAuth callback failed:', error);
+                alert('Authentication failed: ' + error.message);
+                init();  // Fall back to sign-in screen
+            } finally {
+                window.oauthProcessing = false;
             }
         }
 
