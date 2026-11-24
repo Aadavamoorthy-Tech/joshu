@@ -547,21 +547,36 @@
 
         async function startSignIn() {
             try {
+                const redirectUri = `${window.location.origin}/task-dashboard.html`;
+                console.log('Starting sign-in with redirect_uri:', redirectUri);
+                
                 const response = await fetch(`${API_BASE}/auth/signin`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        redirect_uri: `${window.location.origin}/auth.html`
+                        redirect_uri: redirectUri
                     })
                 });
 
+                if (!response.ok) {
+                    const error = await response.json();
+                    console.error('Sign-in error:', error);
+                    alert('Sign-in failed: ' + (error.message || 'Unknown error'));
+                    return;
+                }
+
                 const data = await response.json();
+                console.log('Sign-in response:', data);
+                
                 if (data.redirect_url) {
+                    console.log('Redirecting to:', data.redirect_url);
                     window.location.href = data.redirect_url;
+                } else {
+                    alert('No redirect URL received from server');
                 }
             } catch (error) {
                 console.error('Sign-in failed:', error);
-                alert('Failed to start sign-in process');
+                alert('Failed to start sign-in process: ' + error.message);
             }
         }
 
