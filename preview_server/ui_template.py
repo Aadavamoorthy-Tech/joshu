@@ -2041,7 +2041,7 @@ APP_HTML = """<!doctype html>
 
       function renderGoogleSetupGuide(redirectUri, detailMessage) {
         googleHelp.replaceChildren();
-        if (detailMessage && detailMessage.includes("not a valid OAuth 2.0 Client ID")) {
+        if (detailMessage) {
           const errP = document.createElement("p");
           errP.style.color = "var(--reject-hover)";
           errP.style.fontWeight = "600";
@@ -2050,15 +2050,15 @@ APP_HTML = """<!doctype html>
         }
         const p1 = document.createElement("p");
         p1.append(
-          document.createTextNode("Google OAuth is ready once "),
+          document.createTextNode("Set "),
           Object.assign(document.createElement("code"), { textContent: "GOOGLE_CLIENT_ID" }),
           document.createTextNode(" and "),
           Object.assign(document.createElement("code"), { textContent: "GOOGLE_CLIENT_SECRET" }),
-          document.createTextNode(" are set in "),
+          document.createTextNode(" in Settings → Secrets (or "),
           Object.assign(document.createElement("code"), { textContent: ".env" }),
-          document.createTextNode(" or "),
+          document.createTextNode(" / "),
           Object.assign(document.createElement("code"), { textContent: "backend/.env" }),
-          document.createTextNode(" (for local VS Code runs) or Settings → Secrets.")
+          document.createTextNode(" in VS Code).")
         );
         const p2 = document.createElement("p");
         p2.append(
@@ -2086,7 +2086,14 @@ APP_HTML = """<!doctype html>
               poll_interval_minutes: Number(pollIntervalSelect.value || 15)
             })
           });
-          const data = await res.json();
+          const rawText = await res.text();
+          let data = {};
+          try {
+            data = rawText ? JSON.parse(rawText) : {};
+          } catch (_) {
+            showAuthError("Server returned an unexpected response (HTTP " + res.status + "). Please refresh and try again.");
+            return;
+          }
           if (!res.ok) {
             if (data.error === "google_oauth_not_configured") {
               renderGoogleSetupGuide(data.redirect_uri || serverConfig.redirect_uri, data.message);

@@ -215,7 +215,7 @@ class JoshuHandler(BaseHTTPRequestHandler):
                 )
             except GoogleOAuthConfigError as exc:
                 self._send_json(
-                    503,
+                    400,
                     {
                         "error": "google_oauth_not_configured",
                         "message": str(exc),

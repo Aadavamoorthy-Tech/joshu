@@ -136,17 +136,35 @@ def _require_google_credentials(request_origin: str) -> Tuple[str, str, str]:
     client_id = _clean_env_secret("GOOGLE_CLIENT_ID")
     client_secret = _clean_env_secret("GOOGLE_CLIENT_SECRET")
     cfg = get_google_oauth_config(request_origin)
-    if not client_id or not client_secret:
+    if not client_id and not client_secret:
         raise GoogleOAuthConfigError(
-            "Google Cloud Console OAuth credentials are not configured yet. "
-            "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your .env (or backend/.env) "
-            f"and add {cfg['redirect_uri']} as an Authorized Redirect URI in Google Cloud Console."
+            "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are not set yet in this environment. "
+            f"Add them in Settings → Secrets (or .env / backend/.env locally) and register {cfg['redirect_uri']} "
+            "as an Authorized Redirect URI in Google Cloud Console."
+        )
+    if not client_id:
+        raise GoogleOAuthConfigError(
+            "GOOGLE_CLIENT_ID is missing. Add your Web application OAuth 2.0 Client ID "
+            "(ending in .apps.googleusercontent.com) in Settings → Secrets or .env."
+        )
+    if client_id.startswith("GOCSPX-"):
+        raise GoogleOAuthConfigError(
+            "GOOGLE_CLIENT_ID starts with GOCSPX-, which is a Client Secret — it looks like "
+            "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET were swapped."
+        )
+    if client_id.startswith("AIza"):
+        raise GoogleOAuthConfigError(
+            "GOOGLE_CLIENT_ID starts with AIza, which is a Google API Key. Sign in with Google requires an "
+            "OAuth 2.0 Client ID (Application type: Web application, ending in .apps.googleusercontent.com)."
         )
     if not is_valid_google_client_id(client_id):
         raise GoogleOAuthConfigError(
-            "GOOGLE_CLIENT_ID is not a valid OAuth 2.0 Client ID (it must end with .apps.googleusercontent.com). "
-            "A Google API Key (AIza...) cannot be used for Sign in with Google — create an OAuth 2.0 Client ID "
-            "(Application type: Web application) under Google Cloud Console → APIs & Services → Credentials."
+            "GOOGLE_CLIENT_ID must be a full Google OAuth 2.0 Web Client ID ending in "
+            ".apps.googleusercontent.com (check for missing suffix or extra characters in Settings → Secrets)."
+        )
+    if not client_secret:
+        raise GoogleOAuthConfigError(
+            "GOOGLE_CLIENT_SECRET is missing. Add the matching OAuth 2.0 Client Secret in Settings → Secrets or .env."
         )
     return client_id, client_secret, str(cfg["redirect_uri"])
 
