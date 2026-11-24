@@ -59,20 +59,12 @@ app/lib/
 │       └── app_config.dart            → Load API base URL from environment
 ├── providers/
 │   ├── core_providers.dart            → Singleton: appConfig, tokenStorage, sessionService, apiClient
-│   ├── auth_provider.dart             → AuthController for auth state
+│   ├── auth_provider.dart             → AuthController for auth state (/auth/refresh, /auth/logout)
 │   └── tasks_provider.dart (planned)  → Riverpod for approval tasks
-├── ui/
-│   ├── screens/
-│   │   ├── sign_in_screen.dart        → OAuth trigger (placeholder)
-│   │   ├── inbox_screen.dart          → Task list (placeholder)
-│   │   └── settings_screen.dart (planned)
-│   ├── widgets/
-│   │   ├── approval_card.dart (planned)      → Meeting/bill approval UI
-│   │   ├── reconnect_google_banner.dart (planned) → 7-day expiry UX
-│   │   └── task_details_section.dart (planned)
-│   └── theme/
-│       └── app_theme.dart (planned)
-└── main.dart                          → App root with ProviderScope + Riverpod
+├── presentation/
+│   └── screens/
+│       └── sign_in_screen.dart        → Google OAuth sign-in screen (flutter_web_auth_2)
+└── main.dart                          → App root with ProviderScope, /signin & /home routes, InboxScreen
 ```
 
 ### 2. **Platform-Specific Fixes** ✓
@@ -135,13 +127,15 @@ dev_dependencies:
 
 ---
 
-## 📐 API Contracts (Backend ↔ Frontend Ready)
+## 📐 API Contracts (Backend ↔ Frontend Implemented)
 
 ```
-Session Lifecycle:
-  GET  /oauth/authorize                → Redirect to Google consent
-  GET  /oauth/callback?code=...        → Backend exchanges, returns session_token
-  POST /oauth/token                    → Validate & refresh, returns UserProfile + scopes
+Session Lifecycle (Implemented in backend/app/routes/auth.py):
+  POST /auth/signin                    → Returns Google OAuth consent redirect_url with single-use CSRF state
+  GET  /auth/callback?code=&state=     → Validates state, exchanges code, verifies ID token, returns session_token + user
+  POST /auth/refresh                   → Rotates active 30-day session_token & deactivates previous session
+  POST /auth/logout                    → Revokes active session_token (is_active = False)
+  GET  /auth/me                        → Returns authenticated user profile and session expiry
 
 Task Management (not yet implemented on backend):
   GET  /tasks?status=pending           → List pending/approved/rejected tasks
@@ -149,20 +143,18 @@ Task Management (not yet implemented on backend):
   POST /tasks/{taskId}/reject          → Mark rejected
 
 Error Responses:
-  401  → { code: "unauthorized" }
-  403  → { code: "googleReconnectRequired" } or { code: "scopeUpgradeRequired" }
-  422  → { code: "validationError", detail: "..." }
+  400/401/403/404/500 → { "error": "<error_code>", "message": "<human_message>", "status": <http_status> }
 ```
 
 ---
 
-## 🚀 Next Steps (Not Yet Started)
+## 🚀 Next Steps
 
-### Phase 1: OAuth Integration
-- [ ] Implement FastAPI endpoints: `/oauth/authorize`, `/oauth/callback`, `/oauth/token` (backend ready per checkpoint 1)
-- [ ] Wire Flutter sign-in screen to OAuth flow
-- [ ] Test session persistence across app restarts
-- [ ] Test OAuth token refresh at 5-min boundary
+### Phase 1: OAuth Integration (✅ Completed)
+- [x] Implement FastAPI database models (`User`, `Session`, `OAuthState`) and reusable `validate_session` middleware
+- [x] Implement FastAPI endpoints: `POST /auth/signin`, `GET /auth/callback`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`
+- [x] Wire Flutter `SignInScreen` (`flutter_web_auth_2` + `web/auth.html` popup relay), `AuthController`, `ApiClient` single-flight 401 refresh, and `InboxScreen` Sign Out
+- [x] Add backend pytest suite (`backend/tests/test_auth.py`), Flutter Riverpod widget tests (`app/test/widget_test.dart`), and `backend/AUTH_FLOW.md`
 
 ### Phase 2: Gmail Polling & Task Extraction
 - [ ] Background Gmail polling worker (APScheduler on Render)
@@ -232,10 +224,9 @@ flutter build web --release
 ---
 
 ## 📊 Current Test Status
-- **Backend**: 3/3 health endpoint tests passing ✓
-- **Flutter**: 2/2 widget tests (placeholder UI) passing ✓
-- **Web Build**: Successfully compiles ✓
-- **Platform Compatibility**: Android/Windows conditional imports verified ✓
+- **Backend**: Health tests (`backend/tests/test_health.py`) + OAuth integration test suite (`backend/tests/test_auth.py`) added (run `pytest tests/ -v` locally)
+- **Flutter**: Deterministic Riverpod widget tests (`app/test/widget_test.dart`) covering cold-start SignInScreen, startup `/auth/refresh` + Sign Out, and full OAuth sign-in flow (run `flutter test` locally)
+- **Platform Compatibility**: Web (`/auth.html` + `WebTokenStorageAdapter`) and native Android/Windows (`NativeSecureStorageAdapter`) conditional imports preserved ✓
 
 ---
 
@@ -246,8 +237,7 @@ flutter build web --release
 | Analyzer warnings on conditional imports | Expected; build succeeds regardless | Current (acceptable) |
 | Android & Windows not yet tested | Will install SDKs in Phase 7 | Phase 7 |
 | No offline task cache | Planned with Drift/IndexedDB | Phase 5 |
-| Token refresh not wired to backend | POST /oauth/token ready on backend | Phase 1 |
-| No approval UI yet | Placeholder InboxScreen ready | Phase 3 |
+| No approval UI yet | Authenticated InboxScreen with Sign Out ready | Phase 3 |
 
 ---
 

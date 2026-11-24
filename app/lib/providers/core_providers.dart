@@ -5,6 +5,7 @@ import '../core/auth/token_storage_adapter.dart';
 import '../core/auth/token_storage_web.dart';
 import '../core/config/app_config.dart';
 import '../core/network/api_client.dart';
+import 'auth_provider.dart';
 
 // Only import native on non-web platforms using conditional import
 import '../core/auth/token_storage_native.dart'
@@ -35,16 +36,19 @@ final apiClientProvider = Provider<ApiClient>((ref) {
   final config = ref.watch(appConfigProvider);
   final sessionService = ref.watch(sessionServiceProvider);
 
-  return ApiClient(
+  final client = ApiClient(
     baseUrl: config.apiBaseUrl,
     sessionService: sessionService,
     onUnauthorizedSession: () {
-      // TODO: Navigate to sign-in screen
-      // In production, replace with logging framework
+      ref
+          .read(authControllerProvider.notifier)
+          .forceSignedOut('Session expired. Please sign in again.');
     },
     onGoogleReconnectRequired: () {
-      // TODO: Show reconnect banner
-      // In production, replace with logging framework
+      ref.read(authControllerProvider.notifier).markGoogleReconnectRequired();
     },
   );
+
+  ref.onDispose(client.close);
+  return client;
 });

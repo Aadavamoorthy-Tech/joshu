@@ -5,8 +5,15 @@ import 'package:http/http.dart' as http;
 import '../auth/session_service.dart';
 import 'api_exception.dart';
 
-/// Centralized HTTP wrapper with bearer injection, single-flight 401 retry, and error mapping.
+/// Centralized HTTP wrapper with Bearer injection, single-flight 401 refresh, and error mapping.
 class ApiClient {
+  static const _nonRefreshablePaths = <String>{
+    '/auth/signin',
+    '/auth/callback',
+    '/auth/refresh',
+    '/auth/logout',
+  };
+
   final String baseUrl;
   final http.Client _http;
   final SessionService _sessionService;
@@ -17,11 +24,12 @@ class ApiClient {
 
   ApiClient({
     required this.baseUrl,
-    required this._sessionService,
+    required SessionService sessionService,
     required this.onUnauthorizedSession,
     required this.onGoogleReconnectRequired,
     http.Client? httpClient,
-  }) : _http = httpClient ?? http.Client();
+  })  : _sessionService = sessionService,
+        _http = httpClient ?? http.Client();
 
   /// Sends an authenticated GET request and decodes JSON.
   Future<Map<String, dynamic>> getJson(
@@ -30,7 +38,7 @@ class ApiClient {
   }) =>
       _send('GET', path, queryParameters: queryParameters);
 
-  /// Sends an authenticated POST request with optional idempotency key.
+  /// Sends an authenticated POST request with optional body and idempotency key.
   Future<Map<String, dynamic>> postJson(
     String path, {
     Map<String, dynamic>? body,
@@ -54,7 +62,12 @@ class ApiClient {
     String? idempotencyKey,
     bool isRetry = false,
   }) async {
-    final uri = Uri.parse('$baseUrl$path').replace(queryParameters: queryParameters);
+    final normalizedBase = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+    final uri = Uri.parse('$normalizedBase$path').replace(
+      queryParameters: queryParameters,
+    );
     final stopwatch = Stopwatch()..start();
 
     try {
@@ -72,26 +85,28 @@ class ApiClient {
       }
 
       final streamResponse = await _http.send(request).timeout(
-        const Duration(seconds: 30),
-        onTimeout: () => throw TimeoutException('Request timeout after 30s'),
-      );
+            const Duration(seconds: 30),
+            onTimeout: () => throw TimeoutException('Request timeout after 30s'),
+          );
 
       final response = await http.Response.fromStream(streamResponse);
-      _logSafe(method, path, response.statusCode, stopwatch.elapsedMilliseconds);
+      stopwatch.stop();
+      _logSafe(method, uri.path, response.statusCode, stopwatch.elapsedMilliseconds);
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        if (response.body.isEmpty) return <String, dynamic>{};
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) return decoded;
+        return <String, dynamic>{'data': decoded};
       }
 
-      /// Handle 401 (unauthorized session) with single-flight refresh
-      if (response.statusCode == 401 && !isRetry && path != '/oauth/token') {
-        _refreshInFlight ??= Completer<bool>();
-
-        final canRetry = await _refreshInFlight!.future;
-        _refreshInFlight = null;
-
-        if (canRetry) {
-          return await _send(
+      // Single-flight 401 refresh for protected routes only.
+      if (response.statusCode == 401 &&
+          !isRetry &&
+          !_nonRefreshablePaths.contains(path)) {
+        final refreshed = await _attemptSingleFlightRefresh();
+        if (refreshed) {
+          return _send(
             method,
             path,
             queryParameters: queryParameters,
@@ -101,57 +116,119 @@ class ApiClient {
           );
         }
 
+        await _sessionService.clearSession();
         onUnauthorizedSession();
-        throw ApiException(
+        throw const ApiException(
           code: ApiErrorCode.unauthorized,
           message: 'Session expired. Please sign in again.',
           statusCode: 401,
         );
       }
 
-      /// Map HTTP errors to domain errors
       _throwApiException(response);
     } on TimeoutException {
-      throw ApiException(
+      throw const ApiException(
         code: ApiErrorCode.timeout,
         message: 'Request timed out. Please check your connection.',
       );
-    } on http.ClientException catch (e) {
-      /// Browser CORS blocks appear as ClientException on web
+    } on http.ClientException {
       throw ApiException(
         code: ApiErrorCode.corsOrNetworkBlocked,
-        message: 'Network error or CORS blocked. ${e.message}',
+        message: kIsWeb
+            ? 'Unable to reach the server. Check your connection or backend CORS settings.'
+            : 'Network unavailable. Please check your connection.',
       );
     } on ApiException {
       rethrow;
-    } catch (e) {
-      throw ApiException(
+    } catch (_) {
+      throw const ApiException(
         code: ApiErrorCode.unknown,
-        message: 'Unexpected error: $e',
+        message: 'An unexpected client error occurred.',
       );
     }
   }
 
-  /// Maps HTTP status codes and backend error responses to domain exceptions.
-  /// This method always throws and never returns.
+  /// Rotates the opaque session token once across concurrent 401 failures.
+  Future<bool> _attemptSingleFlightRefresh() async {
+    if (_refreshInFlight != null) {
+      return _refreshInFlight!.future;
+    }
+
+    final completer = Completer<bool>();
+    _refreshInFlight = completer;
+
+    try {
+      final token = await _sessionService.getToken();
+      if (token == null) {
+        completer.complete(false);
+        return false;
+      }
+
+      final normalizedBase = baseUrl.endsWith('/')
+          ? baseUrl.substring(0, baseUrl.length - 1)
+          : baseUrl;
+      final uri = Uri.parse('$normalizedBase/auth/refresh');
+      final response = await _http
+          .post(
+            uri,
+            headers: {
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final newToken = data['session_token'] as String?;
+        final expiresAtRaw = data['expires_at'] as String?;
+        if (newToken != null && expiresAtRaw != null) {
+          final existingScopes =
+              _sessionService.cachedSession?.grantedScopes ?? const {'openid', 'email', 'profile'};
+          await _sessionService.saveSessionData(
+            token: newToken,
+            expiresAt: DateTime.parse(expiresAtRaw),
+            grantedScopes: existingScopes,
+          );
+          completer.complete(true);
+          return true;
+        }
+      }
+
+      completer.complete(false);
+      return false;
+    } catch (_) {
+      completer.complete(false);
+      return false;
+    } finally {
+      _refreshInFlight = null;
+    }
+  }
+
+  /// Maps HTTP status codes and structured JSON errors to domain exceptions.
   Never _throwApiException(http.Response response) {
     final statusCode = response.statusCode;
 
     Map<String, dynamic>? body;
     try {
-      body = jsonDecode(response.body) as Map<String, dynamic>?;
+      final parsed = jsonDecode(response.body);
+      if (parsed is Map<String, dynamic>) {
+        body = parsed;
+      }
     } catch (_) {
       body = null;
     }
 
-    final detail = body?['detail'] as String? ?? 'Unknown error';
-    final code = body?['code'] as String?;
+    final message = (body?['message'] as String?) ??
+        (body?['detail'] is String ? body!['detail'] as String : null) ??
+        'Request failed with status $statusCode';
+    final errorCode = (body?['error'] as String?) ?? (body?['code'] as String?);
 
     final apiErrorCode = switch (statusCode) {
       401 => ApiErrorCode.unauthorized,
-      403 => code == 'google_token_expired'
+      403 => errorCode == 'google_token_expired'
           ? ApiErrorCode.googleReconnectNeeded
-          : code == 'scope_upgrade_required'
+          : errorCode == 'scope_upgrade_required'
               ? ApiErrorCode.scopeUpgradeRequired
               : ApiErrorCode.forbidden,
       400 || 422 => ApiErrorCode.validationError,
@@ -168,12 +245,12 @@ class ApiClient {
     throw ApiException(
       code: apiErrorCode,
       statusCode: statusCode,
-      message: detail,
-      serverRuleId: code,
+      message: message,
+      serverRuleId: errorCode,
     );
   }
 
-  /// Logs only non-sensitive metadata (never tokens, query params, or PII bodies).
+  /// Logs only non-sensitive metadata (never tokens, query params, or PII).
   void _logSafe(String method, String path, int status, int elapsedMs) {
     if (kDebugMode) {
       debugPrint('[ApiClient] $method $path -> $status (${elapsedMs}ms)');
