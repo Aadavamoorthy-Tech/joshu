@@ -26,6 +26,44 @@ _TASK_APPROVAL_COLUMN_MIGRATIONS: tuple[tuple[str, str], ...] = (
     ("approved_by_user", "ALTER TABLE tasks ADD COLUMN approved_by_user BOOLEAN NOT NULL DEFAULT 0"),
 )
 
+# Allowlisted static statements only used if an empty legacy pre-Phase-1 schema is detected.
+_LEGACY_TABLES: tuple[tuple[str, str, str], ...] = (
+    ("audit_logs", "SELECT COUNT(*) FROM audit_logs", "DROP TABLE IF EXISTS audit_logs"),
+    ("tasks", "SELECT COUNT(*) FROM tasks", "DROP TABLE IF EXISTS tasks"),
+    ("sessions", "SELECT COUNT(*) FROM sessions", "DROP TABLE IF EXISTS sessions"),
+    ("oauth_tokens", "SELECT COUNT(*) FROM oauth_tokens", "DROP TABLE IF EXISTS oauth_tokens"),
+    ("users", "SELECT COUNT(*) FROM users", "DROP TABLE IF EXISTS users"),
+)
+
+
+def _replace_empty_legacy_schema(target_engine: Engine) -> None:
+    """Detect and replace empty pre-Phase-1 prototype tables (missing `id` PK) safely."""
+    inspector = inspect(target_engine)
+    existing_tables = set(inspector.get_table_names())
+
+    legacy_detected = False
+    for table_name in ("users", "sessions", "tasks"):
+        if table_name in existing_tables:
+            cols = {col["name"] for col in inspector.get_columns(table_name)}
+            if "id" not in cols:
+                legacy_detected = True
+                break
+
+    if not legacy_detected:
+        return
+
+    # Only auto-drop if all legacy tables are empty so user data is never lost.
+    with target_engine.begin() as conn:
+        for table_name, count_sql, _ in _LEGACY_TABLES:
+            if table_name in existing_tables:
+                row_count = conn.execute(text(count_sql)).scalar() or 0
+                if row_count > 0:
+                    return
+
+        for table_name, _, drop_sql in _LEGACY_TABLES:
+            if table_name in existing_tables:
+                conn.execute(text(drop_sql))
+
 
 def ensure_task_approval_columns(target_engine: Engine) -> None:
     """Idempotently add Phase 3 approval columns if an existing `tasks` table predates them."""
@@ -57,6 +95,7 @@ def init_db() -> None:
     from app.models import session as _session_models  # noqa: F401
     from app.models import task as _task_models  # noqa: F401
 
+    _replace_empty_legacy_schema(engine)
     Base.metadata.create_all(bind=engine)
     ensure_task_approval_columns(engine)
 

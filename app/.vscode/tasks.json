@@ -5,7 +5,13 @@
       "label": "flutter: run web",
       "type": "shell",
       "command": "flutter",
-      "args": ["run", "-d", "web"],
+      "args": [
+        "run",
+        "-d",
+        "chrome",
+        "--web-port=3000",
+        "--dart-define=API_BASE_URL=http://localhost:8000"
+      ],
       "isBackground": true,
       "presentation": {
         "reveal": "always",
