@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import uuid
 from datetime import timedelta, timezone
@@ -62,6 +63,24 @@ def _get_allowed_redirect_uris(default_redirect_uri: str) -> List[str]:
     return configured
 
 
+def _is_valid_redirect_uri(redirect_uri: str) -> bool:
+    """Check if redirect_uri is valid: exact match in list OR matches localhost regex."""
+    allowed = _get_allowed_redirect_uris(
+        os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/callback").strip()
+    )
+    
+    # Exact match check
+    if redirect_uri in allowed:
+        return True
+    
+    # For localhost/127.0.0.1 with /auth.html path, allow ANY port
+    localhost_pattern = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?/auth\.html$"
+    if re.match(localhost_pattern, redirect_uri):
+        return True
+    
+    return False
+
+
 def _build_google_flow(client_id: str, client_secret: str, redirect_uri: str) -> Flow:
     """Create a Google OAuth 2.0 Web Application Flow."""
     flow = Flow.from_client_config(
@@ -114,18 +133,19 @@ def auth_signin(
 ) -> Dict[str, str]:
     """Return the Google OAuth 2.0 consent URL with a single-use CSRF state token."""
     client_id, client_secret, default_redirect_uri, _ = _get_oauth_settings()
-    allowed_redirects = _get_allowed_redirect_uris(default_redirect_uri)
 
     target_redirect_uri = (
         payload.redirect_uri.strip()
         if payload and payload.redirect_uri
         else default_redirect_uri
     )
-    if target_redirect_uri not in allowed_redirects:
+    
+    # Use dynamic validation that accepts any localhost port
+    if not _is_valid_redirect_uri(target_redirect_uri):
         raise auth_error(
             400,
             "invalid_redirect_uri",
-            "Requested redirect URI is not in the server allowlist",
+            "Requested redirect URI is not valid (must be localhost or in allowlist)",
         )
 
     state = secrets.token_urlsafe(32)
