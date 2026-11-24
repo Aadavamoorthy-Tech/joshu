@@ -1,67 +1,38 @@
-# AgentRails
+# Personal AI Chief of Staff
 
-**Infrastructure built for autonomous agents.**
+A planned, event-driven application that helps users manage everyday administrative tasks. It will monitor connected services, prepare suggested actions, and present them in the application for review.
 
-The internet was built for people: forms, buttons, logins, CAPTCHAs, and checkout pages. Autonomous agents are now first-class users of software, yet they lack verifiable identity, enforceable guardrails, safe payment rails, structured interfaces, auditable memory, and sandbox testing.
+## Status
 
-`AgentRails` provides the open-core Python foundation to make agents safe, accountable, and commercially deployable users of software.
+The application has not been built yet.
 
-## Core Primitives (`app.py`)
+## How it will work
 
-Zero mandatory external dependencies — runs on **Python 3.10+** standard library out of the box.
+The assistant can read and analyze information, check for conflicts, draft responses, and prepare actions. Sending email, creating or changing calendar events, submitting forms, and initiating payments must wait for explicit user approval in the application.
 
-1. **Identity & Delegation (`IdentityAuthority`, `DelegationToken`)**
-   HMAC-SHA256 signed delegation credentials proving which organization or principal an agent acts on behalf of, with scoped permissions, expiration, and revocation.
-2. **Scoped Permissions (`PermissionPolicy`, `PolicyEngine`)**
-   Deterministic pre-execution enforcement for allowed scopes, vendor allowlists, single-transaction ceilings, rolling daily spend caps, and human-in-the-loop approval thresholds.
-3. **Spend-Capped Payments (`PaymentVault`, `SpendIntent`, `PaymentReceipt`)**
-   Integer minor-unit accounting, idempotency keys to prevent duplicate charges, and cryptographically signed disbursement receipts.
-4. **Agent-Native Interfaces (`InterfaceRegistry`, `AgentInterface`)**
-   Typed machine-native action contracts replacing brittle DOM automation, logins, and CAPTCHAs.
-5. **Scoped Memory (`AgentMemory`, `MemoryEntry`)**
-   Namespace-isolated persistent state with TTL expiration so agents remember vendor terms and preferences without cross-tenant leakage.
-6. **Sandbox & Audit (`AgentSandbox`, `AuditRecord`, `SandboxReport`)**
-   Immutable execution log and dry-run verification harness for testing agent workflows before touching production accounts or funds.
+Approval, tenant isolation, spend limits, payee allowlists, and other security rules must be enforced by backend code, not solely by LLM instructions. Actions and decisions should be recorded in an audit log.
 
-## Quickstart
+## Planned first release
 
-```bash
-python3 app.py
-```
+- Onboard multiple users and connect their Google accounts through OAuth.
+- Monitor Gmail for bills and meeting invitations and extract structured details.
+- Show tasks, notifications, and approval requests in the application.
+- Create Google Calendar events only after approval.
+- Persist workflow state so tasks can pause for a decision and resume afterward.
 
-## Example Usage
+An initial end-to-end slice is a meeting invitation detected in Gmail, presented in the app for approval or rejection, and added to Calendar only if approved.
 
-```python
-from app import AgentRailsClient, SpendIntent
+## Later phases
 
-client = AgentRailsClient()
+1. Draft refund follow-up emails and send them only after approval; store user profile information securely and prepare forms for approved submission.
+2. Stage bill payments through supported portals or payment APIs, enforce spend and payee rules, and require approval before payment execution.
 
-token = client.identity.issue_token(
-    agent_id="agent_procurement_01",
-    principal_id="org_acme_corp",
-    scopes=("procurement.read", "procurement.purchase"),
-    ttl_seconds=1800,
-)
+## Intended architecture
 
-result = client.execute_purchase(
-    token=token,
-    intent=SpendIntent(
-        merchant="linear.app",
-        amount_cents=4_800,
-        currency="USD",
-        description="Team seat renewal",
-        idempotency_key="idem_linear_2026_11",
-    ),
-)
-print(result)
-```
+- **Application interface:** In-app notifications, task status, and approval cards. The platform and frontend technology are yet to be decided.
+- **Backend:** Python and FastAPI, with a stateful workflow engine or persistent state machine.
+- **Integrations:** Google APIs, an LLM for extraction and drafting, and potentially Playwright and payment providers in later phases.
+- **Data and background work:** PostgreSQL for hosted multi-user data, plus a worker for polling and task processing. Local development may use SQLite.
+- **Hosting:** Render web service, managed PostgreSQL, and a background worker; a separate frontend may be hosted as a static site if appropriate.
 
-## Business Model (Open Core)
-
-- **Open-Core SDK (`app.py`)**: Free, embeddable Python primitives driving bottom-up developer adoption.
-- **Managed Control Plane (SaaS)**: Centralized KMS/HSM key custody, Slack/webhook human approval routing, policy versioning, and compliance audit retention.
-- **Agent Payment Rails (Usage / Take-Rate)**: Programmatic virtual card and ACH settlement backed by real-time spend policies.
-
-## License
-
-Apache-2.0
+OAuth credentials and user data must be protected, and Google API permissions should be limited to those required by enabled features. Hosting and integrations are planned, not configured.
