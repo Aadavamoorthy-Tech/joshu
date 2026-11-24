@@ -570,22 +570,36 @@
             const code = params.get('code');
             const state = params.get('state');
 
+            console.log('OAuth callback params:', { code: code ? 'present' : 'missing', state: state ? 'present' : 'missing' });
+
             if (code && state) {
                 try {
-                    const response = await fetch(`${API_BASE}/auth/callback?code=${code}&state=${state}`);
+                    const callbackUrl = `${API_BASE}/auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+                    console.log('Calling backend callback endpoint...');
+                    
+                    const response = await fetch(callbackUrl);
                     const data = await response.json();
+                    
+                    console.log('Backend response:', data);
                     
                     if (data.session_token) {
                         sessionToken = data.session_token;
                         localStorage.setItem('sessionToken', sessionToken);
                         currentUser = data.user;
-                        window.history.replaceState({}, document.title, window.location.pathname);
-                        init();
+                        console.log('OAuth successful, cleaning URL and initializing...');
+                        window.history.replaceState({}, document.title, '/task-dashboard.html');
+                        await loadUserProfile();
+                        await loadTasks();
+                    } else if (data.error) {
+                        console.error('Backend error:', data.message);
+                        alert('Authentication failed: ' + data.message);
                     }
                 } catch (error) {
                     console.error('OAuth callback failed:', error);
-                    alert('Authentication failed');
+                    alert('Authentication failed: ' + error.message);
                 }
+            } else {
+                console.log('No OAuth params in URL, checking for existing session...');
             }
         }
 
@@ -791,9 +805,11 @@
         }
 
         // Check for OAuth callback
-        if (window.location.search.includes('code=')) {
+        if (window.location.search.includes('code=') && window.location.search.includes('state=')) {
+            console.log('OAuth callback detected, handling...');
             handleOAuthCallback();
         } else {
+            console.log('No OAuth callback, initializing normally...');
             init();
         }
     </script>
