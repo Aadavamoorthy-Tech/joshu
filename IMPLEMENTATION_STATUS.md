@@ -131,19 +131,24 @@ dev_dependencies:
 
 ```
 Session Lifecycle (Implemented in backend/app/routes/auth.py):
-  POST /auth/signin                    → Returns Google OAuth consent redirect_url with single-use CSRF state
-  GET  /auth/callback?code=&state=     → Validates state, exchanges code, verifies ID token, returns session_token + user
+  POST /auth/signin                    → Returns Google OAuth consent redirect_url (includes gmail.readonly + offline access)
+  GET  /auth/callback?code=&state=     → Validates state, exchanges code, encrypts Google tokens, returns session_token + user
   POST /auth/refresh                   → Rotates active 30-day session_token & deactivates previous session
   POST /auth/logout                    → Revokes active session_token (is_active = False)
-  GET  /auth/me                        → Returns authenticated user profile and session expiry
+  GET  /auth/me                        → Returns user profile, session expiry, granted_scopes, and google_reconnect_required
 
-Task Management (not yet implemented on backend):
-  GET  /tasks?status=pending           → List pending/approved/rejected tasks
+Gmail Polling & Tasks (Implemented in backend/app/routes/tasks.py):
+  GET  /tasks                          → List extracted tasks for authenticated user (?status=&source=&limit=&offset=)
+  GET  /tasks/{taskId}                 → Fetch single task (tenant-isolated)
+  POST /tasks/sync                     → Trigger Gmail invitation polling (?background=true optional)
+  GET  /tasks/sync/status              → Inspect last sync timestamp, schedule interval, and reconnect flag
+
+Task Approval Actions (Phase 4 — planned):
   POST /tasks/{taskId}/approve         → Mark approved, trigger calendar event
   POST /tasks/{taskId}/reject          → Mark rejected
 
 Error Responses:
-  400/401/403/404/500 → { "error": "<error_code>", "message": "<human_message>", "status": <http_status> }
+  400/401/403/404/500/502 → { "error": "<error_code>", "message": "<human_message>", "status": <http_status> }
 ```
 
 ---
@@ -156,11 +161,12 @@ Error Responses:
 - [x] Wire Flutter `SignInScreen` (`flutter_web_auth_2` + `web/auth.html` popup relay), `AuthController`, `ApiClient` single-flight 401 refresh, and `InboxScreen` Sign Out
 - [x] Add backend pytest suite (`backend/tests/test_auth.py`), Flutter Riverpod widget tests (`app/test/widget_test.dart`), and `backend/AUTH_FLOW.md`
 
-### Phase 2: Gmail Polling & Task Extraction
-- [ ] Background Gmail polling worker (APScheduler on Render)
-- [ ] Parse meeting invites and extract: organizer, date/time, attendees
-- [ ] LLM-based structured extraction (Gemini neon? OpenAI? local model?)
-- [ ] Store tasks in database with approval status
+### Phase 2: Gmail Polling & Task Extraction (✅ Completed)
+- [x] Extend OAuth scopes to include `gmail.readonly` and persist Fernet-encrypted Google tokens (`google_oauth_tokens`)
+- [x] Build deterministic Gmail + iCalendar (`.ics`) invitation parser (`backend/app/services/invite_parser.py`) extracting title, date/time, attendees, and validated event links
+- [x] Create `tasks` database table (`backend/app/models/task.py`) with per-user deduplication on `external_message_id`
+- [x] Implement background `GmailPollingScheduler` (configurable 15-min interval) and authenticated endpoints `GET /tasks`, `GET /tasks/{id}`, `POST /tasks/sync`, `GET /tasks/sync/status`
+- [x] Add stdlib unit tests (`backend/tests/test_invite_parser.py`), FastAPI integration tests (`backend/tests/test_gmail_polling.py`), and `backend/GMAIL_POLLING.md`
 
 ### Phase 3: UI Implementation
 - [ ] Implement InboxScreen with Riverpod task list consumer

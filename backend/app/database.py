@@ -21,6 +21,7 @@ Base = declarative_base()
 def init_db() -> None:
     """Ensure all SQLAlchemy models are imported and tables exist."""
     from app.models import session as _session_models  # noqa: F401
+    from app.models import task as _task_models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
 

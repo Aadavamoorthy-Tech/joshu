@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.database import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.session import OAuthState, Session as UserSession, User, utc_now  # noqa: E402
+from app.models.task import GoogleOAuthToken  # noqa: E402
 from app.routes import auth as auth_routes  # noqa: E402
 
 
@@ -74,7 +75,7 @@ class _FakeFlow:
             "https://accounts.google.com/o/oauth2/v2/auth"
             f"?client_id=test-client-id.apps.googleusercontent.com"
             f"&redirect_uri={self.redirect_uri}"
-            f"&scope=openid+email+profile"
+            f"&scope=openid+email+profile+https://www.googleapis.com/auth/gmail.readonly"
             f"&state={state}"
         )
         return url, state
@@ -110,6 +111,7 @@ def test_signin_returns_redirect_url_and_stores_state(
     qs = parse_qs(parsed.query)
     assert "state" in qs
     assert "openid" in qs["scope"][0]
+    assert "https://www.googleapis.com/auth/gmail.readonly" in auth_routes.OAUTH_SCOPES
 
     stored = db_session.query(OAuthState).filter_by(state=qs["state"][0]).first()
     assert stored is not None
@@ -180,6 +182,13 @@ def test_callback_creates_user_and_30_day_uuid_session(
     assert session_row.is_active is True
     delta = session_row.expires_at - session_row.created_at
     assert delta == timedelta(days=30)
+
+    # Verify Google OAuth credentials were persisted encrypted (never plaintext)
+    token_row = db_session.query(GoogleOAuthToken).filter_by(user_id=user.id).first()
+    assert token_row is not None
+    assert token_row.encrypted_access_token != "google-access-token-never-returned"
+    assert token_row.encrypted_refresh_token != "google-refresh-token-never-returned"
+    assert token_row.has_gmail_readonly() is True
 
     # Replaying the same state must fail with 400
     with TestClient(app) as client:

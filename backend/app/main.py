@@ -14,6 +14,8 @@ load_dotenv()
 
 from app.database import init_db  # noqa: E402
 from app.routes.auth import router as auth_router  # noqa: E402
+from app.routes.tasks import router as tasks_router  # noqa: E402
+from app.services.gmail_poller import gmail_polling_scheduler  # noqa: E402
 
 
 def _load_allowed_origins() -> list[str]:
@@ -30,12 +32,16 @@ def _load_allowed_origins() -> list[str]:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    yield
+    gmail_polling_scheduler.start()
+    try:
+        yield
+    finally:
+        await gmail_polling_scheduler.stop()
 
 
 app = FastAPI(
     title="Personal AI Chief of Staff API",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -72,3 +78,4 @@ def health() -> dict[str, str]:
 
 
 app.include_router(auth_router)
+app.include_router(tasks_router)

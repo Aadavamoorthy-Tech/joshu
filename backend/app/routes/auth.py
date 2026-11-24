@@ -15,13 +15,16 @@ from google_auth_oauthlib.flow import Flow
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
+from app.core.encryption import encrypt_secret
 from app.database import get_db
 from app.middleware.auth import auth_error, extract_bearer_token, get_current_session
 from app.models.session import OAuthState, Session as UserSession, User, utc_now
+from app.models.task import GoogleOAuthToken
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-OAUTH_SCOPES = ["openid", "email", "profile"]
+GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+OAUTH_SCOPES = ["openid", "email", "profile", GMAIL_READONLY_SCOPE]
 STATE_TTL_MINUTES = 10
 
 
@@ -129,9 +132,9 @@ def auth_signin(
     flow = _build_google_flow(client_id, client_secret, target_redirect_uri)
     authorization_url, _ = flow.authorization_url(
         state=state,
-        access_type="online",
+        access_type="offline",
         include_granted_scopes="true",
-        prompt="select_account",
+        prompt="select_account consent",
     )
 
     try:
@@ -245,6 +248,62 @@ def auth_callback(
             user.updated_at = utc_now()
             db.flush()
 
+        # Extract Google access/refresh tokens to store encrypted server-side for Gmail polling.
+        access_token = None
+        refresh_token = None
+        token_expiry = None
+        granted_scopes_str = " ".join(OAUTH_SCOPES)
+
+        if isinstance(token_response, dict):
+            access_token = token_response.get("access_token")
+            refresh_token = token_response.get("refresh_token")
+            expires_in = token_response.get("expires_in")
+            if isinstance(expires_in, (int, float)) and expires_in > 0:
+                token_expiry = utc_now() + timedelta(seconds=int(expires_in))
+            if token_response.get("scope"):
+                granted_scopes_str = str(token_response["scope"])
+
+        if flow.credentials is not None:
+            access_token = access_token or getattr(flow.credentials, "token", None)
+            refresh_token = refresh_token or getattr(flow.credentials, "refresh_token", None)
+            cred_expiry = getattr(flow.credentials, "expiry", None)
+            if token_expiry is None and cred_expiry is not None:
+                token_expiry = cred_expiry.replace(tzinfo=None)
+            cred_scopes = getattr(flow.credentials, "scopes", None)
+            if cred_scopes:
+                granted_scopes_str = " ".join(cred_scopes)
+
+        if access_token:
+            existing_token = (
+                db.query(GoogleOAuthToken)
+                .filter(GoogleOAuthToken.user_id == user.id)
+                .first()
+            )
+            encrypted_access = encrypt_secret(str(access_token))
+            encrypted_refresh = encrypt_secret(str(refresh_token)) if refresh_token else None
+
+            if existing_token is None:
+                db.add(
+                    GoogleOAuthToken(
+                        user_id=user.id,
+                        encrypted_access_token=encrypted_access,
+                        encrypted_refresh_token=encrypted_refresh,
+                        token_expiry=token_expiry,
+                        scopes=granted_scopes_str,
+                        needs_reconnect=False,
+                        last_error=None,
+                    )
+                )
+            else:
+                existing_token.encrypted_access_token = encrypted_access
+                if encrypted_refresh:
+                    existing_token.encrypted_refresh_token = encrypted_refresh
+                existing_token.token_expiry = token_expiry
+                existing_token.scopes = granted_scopes_str
+                existing_token.needs_reconnect = False
+                existing_token.last_error = None
+                existing_token.updated_at = utc_now()
+
         created_at = utc_now()
         expires_at = created_at + timedelta(days=expiry_days)
         session_id = str(uuid.uuid4())
@@ -356,8 +415,9 @@ def auth_logout(
 def auth_me(
     current_session: UserSession = Depends(get_current_session),
 ) -> Dict[str, Any]:
-    """Return the authenticated user's profile and current session expiry."""
+    """Return the authenticated user's profile, session expiry, and Gmail scope status."""
     user = current_session.user
+    token_record = user.google_token
     return {
         "user": {
             "email": user.email,
@@ -365,4 +425,6 @@ def auth_me(
             "picture_url": user.picture_url,
         },
         "expires_at": _format_iso_utc(current_session.expires_at),
+        "granted_scopes": token_record.scope_list() if token_record else ["openid", "email", "profile"],
+        "google_reconnect_required": bool(token_record.needs_reconnect) if token_record else False,
     }

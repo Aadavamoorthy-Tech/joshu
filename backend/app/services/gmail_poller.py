@@ -1,0 +1,460 @@
+"""Background Gmail polling worker and on-demand invite sync service."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import logging
+import os
+import uuid
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Any, Callable, Dict, List, Optional
+
+from google.auth.exceptions import RefreshError
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build as build_google_service
+from googleapiclient.errors import HttpError
+from sqlalchemy.orm import Session as DBSession
+
+from app.core.encryption import decrypt_secret, encrypt_secret
+from app.database import SessionLocal
+from app.models.session import Session as UserSession, utc_now
+from app.models.task import GoogleOAuthToken, Task
+from app.services.invite_parser import parse_gmail_invite_message
+
+logger = logging.getLogger("joshu.gmail_poller")
+
+DEFAULT_POLL_INTERVAL_MINUTES = 15
+DEFAULT_MAX_MESSAGES_PER_POLL = 25
+DEFAULT_GMAIL_QUERY = (
+    'has:attachment filename:ics OR '
+    'subject:("Invitation:" OR "Updated invitation:" OR "Canceled event:" OR "Calendar invite:") '
+    'newer_than:30d'
+)
+
+
+class GmailPollingError(Exception):
+    """Base error raised during Gmail polling."""
+
+
+class GoogleTokenExpiredError(GmailPollingError):
+    """Raised when a user's Google OAuth token is expired/revoked and needs re-consent."""
+
+
+class GmailScopeMissingError(GmailPollingError):
+    """Raised when the user has not yet granted gmail.readonly scope."""
+
+
+class GmailApiError(GmailPollingError):
+    """Raised when Gmail API calls fail due to network errors or upstream outages."""
+
+
+@dataclass(frozen=True)
+class SyncResult:
+    """Summary of a single user's Gmail polling run."""
+
+    user_id: int
+    fetched_messages: int
+    created_tasks: int
+    skipped_duplicates: int
+    ignored_non_invites: int
+    synced_at: str
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def get_poll_interval_minutes() -> int:
+    try:
+        minutes = int(os.getenv("GMAIL_POLL_INTERVAL_MINUTES", str(DEFAULT_POLL_INTERVAL_MINUTES)))
+        return max(1, minutes)
+    except ValueError:
+        return DEFAULT_POLL_INTERVAL_MINUTES
+
+
+def get_max_messages_per_poll() -> int:
+    try:
+        limit = int(os.getenv("GMAIL_MAX_MESSAGES_PER_POLL", str(DEFAULT_MAX_MESSAGES_PER_POLL)))
+        return max(1, min(limit, 100))
+    except ValueError:
+        return DEFAULT_MAX_MESSAGES_PER_POLL
+
+
+def is_polling_enabled() -> bool:
+    return _env_bool("GMAIL_POLLING_ENABLED", True)
+
+
+def _decode_attachment_data(data: str) -> str:
+    padded = data + "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8", errors="replace")
+
+
+def _find_ics_attachment_ids(payload: Dict[str, Any]) -> List[str]:
+    """Find attachment IDs for `.ics` or `text/calendar` MIME parts whose body wasn't inlined."""
+    attachment_ids: List[str] = []
+
+    def _visit(part: Dict[str, Any]) -> None:
+        mime_type = str(part.get("mimeType") or "").lower()
+        filename = str(part.get("filename") or "").lower()
+        body = part.get("body") or {}
+        if (
+            (mime_type in ("text/calendar", "application/ics") or filename.endswith(".ics"))
+            and not body.get("data")
+            and body.get("attachmentId")
+        ):
+            attachment_ids.append(str(body["attachmentId"]))
+        for child in part.get("parts") or []:
+            if isinstance(child, dict):
+                _visit(child)
+
+    _visit(payload)
+    return attachment_ids
+
+
+def _build_google_credentials(token_record: GoogleOAuthToken, db: DBSession) -> Credentials:
+    """Decrypt stored Google tokens, refresh if expired, and persist updated credentials."""
+    if token_record.needs_reconnect:
+        raise GoogleTokenExpiredError(
+            "Google account authorization has expired. Please sign in again to reconnect Gmail."
+        )
+
+    if not token_record.has_gmail_readonly():
+        raise GmailScopeMissingError(
+            "Gmail read access (gmail.readonly) has not been granted. Please re-authorize."
+        )
+
+    try:
+        access_token = decrypt_secret(token_record.encrypted_access_token)
+        refresh_token = (
+            decrypt_secret(token_record.encrypted_refresh_token)
+            if token_record.encrypted_refresh_token
+            else None
+        )
+    except ValueError as exc:
+        token_record.needs_reconnect = True
+        token_record.last_error = "Stored OAuth credentials could not be decrypted"
+        db.commit()
+        raise GoogleTokenExpiredError(
+            "Stored Google credentials are no longer valid. Please sign in again."
+        ) from exc
+
+    client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
+
+    creds = Credentials(
+        token=access_token,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_id or None,
+        client_secret=client_secret or None,
+        scopes=token_record.scope_list(),
+    )
+    if token_record.token_expiry is not None:
+        creds.expiry = token_record.token_expiry
+
+    now = utc_now()
+    needs_refresh = (
+        token_record.token_expiry is not None
+        and token_record.token_expiry <= now + timedelta(minutes=2)
+    ) or creds.expired
+
+    if needs_refresh:
+        if not refresh_token or not client_id or not client_secret:
+            token_record.needs_reconnect = True
+            token_record.last_error = "Access token expired and no refresh token is available"
+            db.commit()
+            raise GoogleTokenExpiredError(
+                "Google access token expired. Please sign in again to reconnect Gmail."
+            )
+
+        try:
+            creds.refresh(GoogleAuthRequest())
+        except RefreshError as exc:
+            token_record.needs_reconnect = True
+            token_record.last_error = "Google refresh token expired or revoked"
+            db.commit()
+            raise GoogleTokenExpiredError(
+                "Google refresh token expired or was revoked. Please sign in again."
+            ) from exc
+        except Exception as exc:
+            token_record.last_error = "Network error while refreshing Google token"
+            db.commit()
+            raise GmailApiError("Unable to reach Google to refresh credentials.") from exc
+
+        token_record.encrypted_access_token = encrypt_secret(str(creds.token))
+        if creds.expiry is not None:
+            token_record.token_expiry = creds.expiry.replace(tzinfo=None)
+        token_record.needs_reconnect = False
+        token_record.last_error = None
+        token_record.updated_at = utc_now()
+        db.commit()
+
+    return creds
+
+
+def _default_gmail_service_factory(creds: Credentials) -> Any:
+    return build_google_service("gmail", "v1", credentials=creds, cache_discovery=False)
+
+
+class GmailPollingService:
+    """Polls Gmail calendar invitations for authenticated users and persists deduplicated tasks."""
+
+    def __init__(
+        self,
+        gmail_service_factory: Callable[[Credentials], Any] = _default_gmail_service_factory,
+        query: Optional[str] = None,
+        max_messages: Optional[int] = None,
+    ) -> None:
+        self._gmail_service_factory = gmail_service_factory
+        self._query = query or os.getenv("GMAIL_POLL_QUERY", DEFAULT_GMAIL_QUERY)
+        self._max_messages = max_messages or get_max_messages_per_poll()
+
+    def poll_user_inbox(self, db: DBSession, user_id: int) -> SyncResult:
+        """Fetch Gmail calendar invitations for a single user and insert any new tasks."""
+        token_record = (
+            db.query(GoogleOAuthToken)
+            .filter(GoogleOAuthToken.user_id == user_id)
+            .first()
+        )
+        if token_record is None:
+            raise GoogleTokenExpiredError(
+                "No Google Gmail credentials found for this account. Please sign in again."
+            )
+
+        creds = _build_google_credentials(token_record, db)
+
+        try:
+            gmail = self._gmail_service_factory(creds)
+            list_response = (
+                gmail.users()
+                .messages()
+                .list(userId="me", q=self._query, maxResults=self._max_messages)
+                .execute()
+            )
+        except HttpError as exc:
+            status_code = getattr(exc.resp, "status", None)
+            if status_code == 401:
+                token_record.needs_reconnect = True
+                token_record.last_error = "Gmail API rejected credentials (401)"
+                db.commit()
+                raise GoogleTokenExpiredError(
+                    "Google authorization expired. Please sign in again."
+                ) from exc
+            if status_code == 403:
+                token_record.last_error = "Gmail API access denied (403)"
+                db.commit()
+                raise GmailScopeMissingError(
+                    "Gmail read access was denied. Please grant gmail.readonly permission."
+                ) from exc
+            token_record.last_error = f"Gmail API HTTP error ({status_code})"
+            db.commit()
+            raise GmailApiError("Gmail API temporarily unavailable.") from exc
+        except Exception as exc:
+            token_record.last_error = "Network error while contacting Gmail API"
+            db.commit()
+            raise GmailApiError("Network error while polling Gmail.") from exc
+
+        message_stubs = list_response.get("messages") or []
+        fetched_count = len(message_stubs)
+        created_count = 0
+        skipped_duplicates = 0
+        ignored_non_invites = 0
+
+        existing_ids = {
+            row[0]
+            for row in db.query(Task.external_message_id)
+            .filter(
+                Task.user_id == user_id,
+                Task.external_message_id.isnot(None),
+            )
+            .all()
+        }
+
+        for stub in message_stubs:
+            msg_id = str(stub.get("id") or "").strip()
+            if not msg_id:
+                continue
+            if msg_id in existing_ids:
+                skipped_duplicates += 1
+                continue
+
+            try:
+                full_message = (
+                    gmail.users()
+                    .messages()
+                    .get(userId="me", id=msg_id, format="full")
+                    .execute()
+                )
+            except Exception:
+                # Skip a single transient message fetch failure without aborting the batch.
+                logger.warning("Skipping Gmail message %s due to fetch error", msg_id)
+                continue
+
+            extra_ics: List[str] = []
+            for attachment_id in _find_ics_attachment_ids(full_message.get("payload") or {}):
+                try:
+                    att = (
+                        gmail.users()
+                        .messages()
+                        .attachments()
+                        .get(userId="me", messageId=msg_id, id=attachment_id)
+                        .execute()
+                    )
+                    if att.get("data"):
+                        extra_ics.append(_decode_attachment_data(str(att["data"])))
+                except Exception:
+                    logger.warning("Failed to fetch ICS attachment for message %s", msg_id)
+
+            extracted = parse_gmail_invite_message(full_message, extra_ics_payloads=extra_ics)
+            if extracted is None:
+                ignored_non_invites += 1
+                continue
+
+            now = utc_now()
+            db.add(
+                Task(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    title=extracted.title,
+                    description=extracted.description,
+                    scheduled_for=extracted.scheduled_for,
+                    source=extracted.source,
+                    status="pending",
+                    external_message_id=extracted.external_message_id,
+                    raw_data=extracted.raw_data,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            existing_ids.add(msg_id)
+            created_count += 1
+
+        synced_at = utc_now()
+        token_record.last_synced_at = synced_at
+        token_record.last_error = None
+        token_record.updated_at = synced_at
+        db.commit()
+
+        return SyncResult(
+            user_id=user_id,
+            fetched_messages=fetched_count,
+            created_tasks=created_count,
+            skipped_duplicates=skipped_duplicates,
+            ignored_non_invites=ignored_non_invites,
+            synced_at=synced_at.isoformat() + "Z",
+        )
+
+    def poll_all_active_users(self, db: DBSession) -> Dict[str, Any]:
+        """Poll Gmail for every user who has an active session and connected Google token."""
+        now = utc_now()
+        active_user_ids = [
+            row[0]
+            for row in db.query(UserSession.user_id)
+            .join(GoogleOAuthToken, GoogleOAuthToken.user_id == UserSession.user_id)
+            .filter(
+                UserSession.is_active.is_(True),
+                UserSession.expires_at > now,
+                GoogleOAuthToken.needs_reconnect.is_(False),
+            )
+            .distinct()
+            .all()
+        ]
+
+        summary: Dict[str, Any] = {
+            "polled_users": 0,
+            "created_tasks": 0,
+            "errors": 0,
+        }
+
+        for uid in active_user_ids:
+            try:
+                result = self.poll_user_inbox(db, uid)
+                summary["polled_users"] += 1
+                summary["created_tasks"] += result.created_tasks
+            except GmailPollingError as exc:
+                summary["errors"] += 1
+                logger.warning("Gmail poll skipped for user_id=%s: %s", uid, exc)
+            except Exception:
+                summary["errors"] += 1
+                logger.exception("Unexpected error during Gmail poll for user_id=%s", uid)
+
+        return summary
+
+
+class GmailPollingScheduler:
+    """Asyncio background loop that triggers GmailPollingService on a configurable interval."""
+
+    def __init__(
+        self,
+        service: Optional[GmailPollingService] = None,
+        session_factory: Callable[[], DBSession] = SessionLocal,
+        interval_minutes: Optional[int] = None,
+    ) -> None:
+        self._service = service or GmailPollingService()
+        self._session_factory = session_factory
+        self._interval_minutes = interval_minutes or get_poll_interval_minutes()
+        self._task: Optional[asyncio.Task[None]] = None
+        self._stop_event = asyncio.Event()
+
+    @property
+    def interval_minutes(self) -> int:
+        return self._interval_minutes
+
+    @property
+    def is_running(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    def _run_cycle_sync(self) -> Dict[str, Any]:
+        db = self._session_factory()
+        try:
+            return self._service.poll_all_active_users(db)
+        finally:
+            db.close()
+
+    async def _loop(self) -> None:
+        interval_seconds = self._interval_minutes * 60
+        logger.info("Gmail polling scheduler started (interval=%dm)", self._interval_minutes)
+        while not self._stop_event.is_set():
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=interval_seconds)
+                break
+            except asyncio.TimeoutError:
+                try:
+                    summary = await asyncio.to_thread(self._run_cycle_sync)
+                    logger.info(
+                        "Gmail poll cycle complete: users=%s tasks=%s errors=%s",
+                        summary["polled_users"],
+                        summary["created_tasks"],
+                        summary["errors"],
+                    )
+                except Exception:
+                    logger.exception("Gmail polling cycle encountered an unexpected error")
+
+    def start(self) -> None:
+        if not is_polling_enabled() or self.is_running:
+            return
+        self._stop_event.clear()
+        self._task = asyncio.create_task(self._loop(), name="joshu-gmail-poller")
+
+    async def stop(self) -> None:
+        if not self.is_running:
+            return
+        self._stop_event.set()
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+        logger.info("Gmail polling scheduler stopped")
+
+
+gmail_polling_service = GmailPollingService()
+gmail_polling_scheduler = GmailPollingScheduler(service=gmail_polling_service)
