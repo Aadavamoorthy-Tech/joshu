@@ -9,7 +9,7 @@ ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 if not ENCRYPTION_KEY:
     # Generate a new key (save this in .env for production)
     ENCRYPTION_KEY = Fernet.generate_key().decode()
-    print(f"⚠️  No ENCRYPTION_KEY found. Generated new key:\n{ENCRYPTION_KEY}\nAdd this to .env as ENCRYPTION_KEY")
+    print(f"WARNING: No ENCRYPTION_KEY found. Generated new key:\n{ENCRYPTION_KEY}\nAdd this to .env as ENCRYPTION_KEY")
 
 cipher = Fernet(ENCRYPTION_KEY.encode())
 
