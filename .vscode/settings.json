@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "C:/Users/bhaga/Desktop/joshu/app/windows"
+    "cmake.sourceDirectory": "C:/Users/bhaga/Desktop/joshu/app/windows",
+    "python.terminal.useEnvFile": true
 }
