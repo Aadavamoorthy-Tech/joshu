@@ -138,14 +138,13 @@ Session Lifecycle (Implemented in backend/app/routes/auth.py):
   GET  /auth/me                        → Returns user profile, session expiry, granted_scopes, and google_reconnect_required
 
 Gmail Polling & Tasks (Implemented in backend/app/routes/tasks.py):
-  GET  /tasks                          → List extracted tasks for authenticated user (?status=&source=&limit=&offset=)
-  GET  /tasks/{taskId}                 → Fetch single task (tenant-isolated)
+  GET  /tasks                          → List extracted tasks for authenticated user (?status=all|pending|approved|rejected) + status counts
+  GET  /tasks/{taskId}                 → Fetch single task with approval metadata (tenant-isolated)
+  POST /tasks/{taskId}/approve         → Idempotently approve task and record approved_at
+  POST /tasks/{taskId}/reject          → Idempotently reject task with optional rejection_reason and rejected_at
+  PATCH /tasks/{taskId}                → Update task status directly (rollback supported)
   POST /tasks/sync                     → Trigger Gmail invitation polling (?background=true optional)
   GET  /tasks/sync/status              → Inspect last sync timestamp, schedule interval, and reconnect flag
-
-Task Approval Actions (Phase 4 — planned):
-  POST /tasks/{taskId}/approve         → Mark approved, trigger calendar event
-  POST /tasks/{taskId}/reject          → Mark rejected
 
 Error Responses:
   400/401/403/404/500/502 → { "error": "<error_code>", "message": "<human_message>", "status": <http_status> }
@@ -168,11 +167,12 @@ Error Responses:
 - [x] Implement background `GmailPollingScheduler` (configurable 15-min interval) and authenticated endpoints `GET /tasks`, `GET /tasks/{id}`, `POST /tasks/sync`, `GET /tasks/sync/status`
 - [x] Add stdlib unit tests (`backend/tests/test_invite_parser.py`), FastAPI integration tests (`backend/tests/test_gmail_polling.py`), and `backend/GMAIL_POLLING.md`
 
-### Phase 3: UI Implementation
-- [ ] Implement InboxScreen with Riverpod task list consumer
-- [ ] Design ApprovalCard widget with state machine (pending → submittingApprove/Reject → approved/rejected/error)
-- [ ] ReconnectGoogleBanner for 7-day Testing token expiry
-- [ ] Task detail view (who invited, when, attendees, etc.)
+### Phase 3: Task Approval UI & Workflow (✅ Completed)
+- [x] Add `approved_at`, `rejected_at`, `rejection_reason`, and `approved_by_user` columns with idempotent startup schema upgrade (`backend/app/database.py`)
+- [x] Implement `POST /tasks/{id}/approve`, `POST /tasks/{id}/reject`, `PATCH /tasks/{id}`, and `status=all` + status counts on `GET /tasks`
+- [x] Build Flutter `TaskModel`, `TaskService`, and Riverpod `TasksController` with optimistic approve/reject updates and automatic error rollback
+- [x] Implement `TasksListScreen` (filter chips, counts, Gmail sync, pull-to-refresh), `TaskCard`, `TaskDetailModal`, and `RejectConfirmationDialog`
+- [x] Add backend approval integration tests (`backend/tests/test_tasks_approval.py`) and Flutter widget tests (`app/test/widget_test.dart`)
 
 ### Phase 4: Approval & Action Execution
 - [ ] POST /tasks/{taskId}/approve endpoint that:

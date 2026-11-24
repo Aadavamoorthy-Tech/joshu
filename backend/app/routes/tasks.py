@@ -1,4 +1,4 @@
-"""Authenticated task listing and on-demand Gmail polling endpoints."""
+"""Authenticated task listing, Gmail sync, and Phase 3 approval workflow endpoints."""
 
 from __future__ import annotations
 
@@ -6,11 +6,13 @@ from datetime import timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session as DBSession
 
 from app.database import SessionLocal, get_db
 from app.middleware.auth import auth_error, get_current_session
-from app.models.session import Session as UserSession
+from app.models.session import Session as UserSession, utc_now
 from app.models.task import GoogleOAuthToken, Task
 from app.services.gmail_poller import (
     GmailApiError,
@@ -25,6 +27,19 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 _VALID_SOURCES = {"email", "calendar"}
 _VALID_STATUSES = {"pending", "approved", "rejected"}
+
+
+class RejectTaskRequest(BaseModel):
+    """Optional payload when rejecting a task."""
+
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+
+class PatchTaskStatusRequest(BaseModel):
+    """Payload for updating a task's approval status directly."""
+
+    status: str = Field(..., min_length=1, max_length=32)
+    rejection_reason: Optional[str] = Field(default=None, max_length=500)
 
 
 def _format_utc(dt) -> Optional[str]:
@@ -49,7 +64,21 @@ def _serialize_task(task: Task) -> Dict[str, Any]:
         "raw_data": raw,
         "created_at": _format_utc(task.created_at),
         "updated_at": _format_utc(task.updated_at),
+        "approved_at": _format_utc(task.approved_at),
+        "rejected_at": _format_utc(task.rejected_at),
+        "rejection_reason": task.rejection_reason,
+        "approved_by_user": bool(task.approved_by_user),
     }
+
+
+def _get_owned_task_or_error(db: DBSession, task_id: str, user_id: int) -> Task:
+    """Fetch a task by ID; raise 404 if missing or 403 if owned by a different user."""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if task is None:
+        raise auth_error(404, "task_not_found", "Task not found")
+    if task.user_id != user_id:
+        raise auth_error(403, "forbidden", "You do not have permission to modify this task")
+    return task
 
 
 def _run_background_sync(user_id: int) -> None:
@@ -63,6 +92,21 @@ def _run_background_sync(user_id: int) -> None:
         db.close()
 
 
+def _status_counts_for_user(db: DBSession, user_id: int) -> Dict[str, int]:
+    rows = (
+        db.query(Task.status, func.count(Task.id))
+        .filter(Task.user_id == user_id)
+        .group_by(Task.status)
+        .all()
+    )
+    counts = {"pending": 0, "approved": 0, "rejected": 0}
+    for status_name, count in rows:
+        if status_name in counts:
+            counts[status_name] = int(count)
+    counts["all"] = counts["pending"] + counts["approved"] + counts["rejected"]
+    return counts
+
+
 @router.get("")
 def list_tasks(
     status: Optional[str] = Query(default=None),
@@ -72,18 +116,19 @@ def list_tasks(
     current_session: UserSession = Depends(get_current_session),
     db: DBSession = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Return extracted tasks owned by the authenticated user."""
+    """Return extracted tasks owned by the authenticated user with status filtering and counts."""
     query = db.query(Task).filter(Task.user_id == current_session.user_id)
 
     if status is not None:
         normalized_status = status.strip().lower()
-        if normalized_status not in _VALID_STATUSES:
-            raise auth_error(
-                400,
-                "invalid_status_filter",
-                "status must be one of: pending, approved, rejected",
-            )
-        query = query.filter(Task.status == normalized_status)
+        if normalized_status != "all":
+            if normalized_status not in _VALID_STATUSES:
+                raise auth_error(
+                    400,
+                    "invalid_status_filter",
+                    "status must be one of: all, pending, approved, rejected",
+                )
+            query = query.filter(Task.status == normalized_status)
 
     if source is not None:
         normalized_source = source.strip().lower()
@@ -108,6 +153,7 @@ def list_tasks(
         "total": total,
         "limit": limit,
         "offset": offset,
+        "counts": _status_counts_for_user(db, current_session.user_id),
     }
 
 
@@ -182,4 +228,134 @@ def get_task(
     if task is None:
         raise auth_error(404, "task_not_found", "Task not found")
 
-    return {"task": _serialize_task(task)}
+    return _serialize_task(task)
+
+
+@router.post("/{task_id}/approve")
+def approve_task(
+    task_id: str,
+    current_session: UserSession = Depends(get_current_session),
+    db: DBSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Idempotently approve a task owned by the authenticated user."""
+    task = _get_owned_task_or_error(db, task_id, current_session.user_id)
+
+    if task.status != "approved":
+        now = utc_now()
+        task.status = "approved"
+        task.approved_by_user = True
+        if task.approved_at is None:
+            task.approved_at = now
+        task.updated_at = now
+        try:
+            db.commit()
+            db.refresh(task)
+        except Exception as exc:
+            db.rollback()
+            raise auth_error(500, "task_update_failed", "Failed to approve task") from exc
+
+    return {
+        "task_id": task.id,
+        "status": task.status,
+        "approved_at": _format_utc(task.approved_at),
+        "approved_by_user": bool(task.approved_by_user),
+        "task": _serialize_task(task),
+        "message": "Task approved successfully",
+    }
+
+
+@router.post("/{task_id}/reject")
+def reject_task(
+    task_id: str,
+    payload: Optional[RejectTaskRequest] = None,
+    current_session: UserSession = Depends(get_current_session),
+    db: DBSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Idempotently reject a task owned by the authenticated user with an optional reason."""
+    task = _get_owned_task_or_error(db, task_id, current_session.user_id)
+    cleaned_reason = (
+        payload.reason.strip() if payload and payload.reason and payload.reason.strip() else None
+    )
+
+    changed = False
+    now = utc_now()
+    if task.status != "rejected":
+        task.status = "rejected"
+        task.approved_by_user = False
+        if task.rejected_at is None:
+            task.rejected_at = now
+        if cleaned_reason is not None:
+            task.rejection_reason = cleaned_reason
+        task.updated_at = now
+        changed = True
+    elif cleaned_reason is not None and not task.rejection_reason:
+        task.rejection_reason = cleaned_reason
+        task.updated_at = now
+        changed = True
+
+    if changed:
+        try:
+            db.commit()
+            db.refresh(task)
+        except Exception as exc:
+            db.rollback()
+            raise auth_error(500, "task_update_failed", "Failed to reject task") from exc
+
+    return {
+        "task_id": task.id,
+        "status": task.status,
+        "rejected_at": _format_utc(task.rejected_at),
+        "rejection_reason": task.rejection_reason,
+        "task": _serialize_task(task),
+        "message": "Task rejected successfully",
+    }
+
+
+@router.patch("/{task_id}")
+def patch_task_status(
+    task_id: str,
+    payload: PatchTaskStatusRequest,
+    current_session: UserSession = Depends(get_current_session),
+    db: DBSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Update a task's status (e.g., rollback approved/rejected -> pending)."""
+    normalized_status = payload.status.strip().lower()
+    if normalized_status not in _VALID_STATUSES:
+        raise auth_error(
+            400,
+            "invalid_status",
+            "status must be one of: pending, approved, rejected",
+        )
+
+    task = _get_owned_task_or_error(db, task_id, current_session.user_id)
+    now = utc_now()
+    task.status = normalized_status
+
+    if normalized_status == "approved":
+        task.approved_by_user = True
+        if task.approved_at is None:
+            task.approved_at = now
+    elif normalized_status == "rejected":
+        task.approved_by_user = False
+        if task.rejected_at is None:
+            task.rejected_at = now
+        if payload.rejection_reason is not None:
+            cleaned = payload.rejection_reason.strip()
+            task.rejection_reason = cleaned or None
+    else:
+        task.approved_by_user = False
+
+    task.updated_at = now
+    try:
+        db.commit()
+        db.refresh(task)
+    except Exception as exc:
+        db.rollback()
+        raise auth_error(500, "task_update_failed", "Failed to update task status") from exc
+
+    return {
+        "task_id": task.id,
+        "status": task.status,
+        "task": _serialize_task(task),
+        "message": "Task status updated successfully",
+    }
