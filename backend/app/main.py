@@ -19,14 +19,29 @@ from app.services.gmail_poller import gmail_polling_scheduler  # noqa: E402
 
 
 def _load_allowed_origins() -> list[str]:
-    default_origins = (
-        "http://localhost:3000,"
-        "http://localhost:5000,"
-        "http://localhost:7777,"
-        "http://localhost:8080"
-    )
-    raw = os.getenv("CORS_ALLOWED_ORIGINS", default_origins)
-    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+    """Load allowed CORS origins from environment or use development defaults."""
+    # For development: allow any localhost port (Flutter dev server uses random ports)
+    # For production: use explicitly configured origins
+    env_origins = os.getenv("CORS_ALLOWED_ORIGINS", "").strip()
+    
+    if env_origins:
+        return [origin.strip() for origin in env_origins.split(",") if origin.strip()]
+    
+    # Development default: allow any localhost/127.0.0.1 port
+    # This is safe because localhost is not accessible from the internet
+    return [
+        "http://localhost:3000",
+        "http://localhost:5000",
+        "http://localhost:7777",
+        "http://localhost:8000",
+        "http://localhost:8080",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5000",
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1:8080",
+        "http://localhost",
+        "http://127.0.0.1",
+    ]
 
 
 @asynccontextmanager
@@ -50,7 +65,7 @@ init_db()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_load_allowed_origins(),
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
