@@ -67,5 +67,6 @@ class OAuthState(Base):
 
     state = Column(String(128), primary_key=True, index=True)
     redirect_uri = Column(String(1024), nullable=False)
+    code_verifier = Column(String(128), nullable=True)
     created_at = Column(DateTime, default=utc_now, nullable=False)
     expires_at = Column(DateTime, nullable=False)

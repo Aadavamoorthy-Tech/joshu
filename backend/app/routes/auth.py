@@ -160,6 +160,10 @@ def auth_signin(
         prompt="select_account consent",
     )
 
+    # Extract code_verifier from flow for PKCE
+    code_verifier = flow.code_verifier
+    logger.info(f"🔐 PKCE code_verifier generated: {code_verifier[:20] if code_verifier else 'None'}...")
+
     try:
         _cleanup_expired_states(db)
         now = utc_now()
@@ -167,6 +171,7 @@ def auth_signin(
             OAuthState(
                 state=state,
                 redirect_uri=target_redirect_uri,
+                code_verifier=code_verifier,
                 created_at=now,
                 expires_at=now + timedelta(minutes=STATE_TTL_MINUTES),
             )
@@ -237,13 +242,17 @@ def auth_callback(
     db.delete(stored_state)
     db.commit()
     logger.info("✅ State consumed")
+    code_verifier = stored_state.code_verifier
+    logger.info(f"🔐 Retrieved code_verifier: {code_verifier[:20] if code_verifier else 'None'}...")
 
     # Exchange authorization code for Google OIDC ID token.
     try:
         logger.info(f"🔄 Exchanging code for token with redirect_uri: {redirect_uri}")
         flow = _build_google_flow(client_id, client_secret, redirect_uri)
-        # Explicitly pass redirect_uri in token exchange
-        token_response = flow.fetch_token(code=code.strip(), redirect_uri=redirect_uri)
+        # Restore the code_verifier for PKCE validation
+        if code_verifier:
+            flow.code_verifier = code_verifier
+        token_response = flow.fetch_token(code=code.strip())
         logger.info("✅ Token exchanged successfully")
     except Exception as exc:
         logger.error(f"❌ Failed to exchange code: {exc}")
