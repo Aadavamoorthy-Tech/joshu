@@ -3,9 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/auth/session_service.dart';
 import '../core/auth/token_storage_adapter.dart';
 import '../core/auth/token_storage_web.dart';
-import '../core/auth/token_storage_native.dart';
 import '../core/config/app_config.dart';
 import '../core/network/api_client.dart';
+
+// Only import native on non-web platforms using conditional import
+import '../core/auth/token_storage_native.dart'
+    if (dart.library.html) '../core/auth/token_storage_web.dart' as platform_storage;
 
 /// Global app configuration loaded from environment.
 final appConfigProvider = Provider<AppConfig>((ref) {
@@ -17,7 +20,8 @@ final tokenStorageAdapterProvider = Provider<TokenStorageAdapter>((ref) {
   if (kIsWeb) {
     return WebTokenStorageAdapter();
   }
-  return NativeSecureStorageAdapter();
+  // On native platforms, NativeSecureStorageAdapter is available via platform_storage
+  return platform_storage.NativeSecureStorageAdapter();
 });
 
 /// Session service for managing auth session lifecycle.
