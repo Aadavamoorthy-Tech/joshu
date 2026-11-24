@@ -242,7 +242,8 @@ def auth_callback(
     try:
         logger.info(f"🔄 Exchanging code for token with redirect_uri: {redirect_uri}")
         flow = _build_google_flow(client_id, client_secret, redirect_uri)
-        token_response = flow.fetch_token(code=code.strip())
+        # Explicitly pass redirect_uri in token exchange
+        token_response = flow.fetch_token(code=code.strip(), redirect_uri=redirect_uri)
         logger.info("✅ Token exchanged successfully")
     except Exception as exc:
         logger.error(f"❌ Failed to exchange code: {exc}")
