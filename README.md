@@ -59,6 +59,12 @@ The default browser origin allowed by CORS is `http://localhost:3000`. Set the `
 
 Install the Flutter SDK and the platform prerequisites described in the [Flutter setup guide](https://docs.flutter.dev/get-started/install). The Android SDK is needed for Android builds; Windows builds require the Visual Studio C++ desktop workload. The generated Android application ID is a placeholder and must be replaced before configuring Google OAuth or publishing.
 
+If Flutter is installed at `%LOCALAPPDATA%\flutter-sdk` but is not on your PATH, add it for the current PowerShell session with:
+
+```powershell
+$env:PATH = "$env:LOCALAPPDATA\flutter-sdk\bin;$env:PATH"
+```
+
 With the backend running, use a second terminal:
 
 ```powershell
