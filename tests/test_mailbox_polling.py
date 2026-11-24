@@ -166,6 +166,8 @@ class TestGoogleOAuthAndSessionIsolation(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
+                "APP_URL": "",
+                "GOOGLE_APP_REDIRECT_URI": "",
                 "GOOGLE_CLIENT_ID": "test-client-id.apps.googleusercontent.com",
                 "GOOGLE_CLIENT_SECRET": "test-client-secret",
             },
@@ -176,6 +178,34 @@ class TestGoogleOAuthAndSessionIsolation(unittest.TestCase):
             self.assertIn("prompt=select_account+consent", url)
             self.assertIn("gmail.readonly", url)
             self.assertIn("access_type=offline", url)
+
+    def test_rejects_api_key_as_oauth_client_id(self) -> None:
+        from preview_server.google_oauth_service import GoogleOAuthConfigError
+
+        with patch.dict(
+            os.environ,
+            {
+                "GOOGLE_CLIENT_ID": "AIzaSyExampleApiKeyNotOAuthClient",
+                "GOOGLE_CLIENT_SECRET": "some-secret",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(GoogleOAuthConfigError):
+                build_google_authorization_url("http://localhost:3000", "state-456")
+
+    def test_hosted_app_url_overrides_localhost_redirect_uri(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "APP_URL": "https://example.run.app",
+                "GOOGLE_APP_REDIRECT_URI": "http://localhost:8000/auth/google/callback",
+                "GOOGLE_CLIENT_ID": "test-client.apps.googleusercontent.com",
+                "GOOGLE_CLIENT_SECRET": "GOCSPX-test",
+            },
+            clear=False,
+        ):
+            _, redirect_uri = build_google_authorization_url("http://localhost:3000", "state-789")
+            self.assertEqual(redirect_uri, "https://example.run.app/auth/google/callback")
 
     def test_session_isolation_dedup_and_credential_wipe_on_signout(self) -> None:
         def fake_imap_fetcher(email_address, password, imap_host, imap_port=993, max_messages=20):

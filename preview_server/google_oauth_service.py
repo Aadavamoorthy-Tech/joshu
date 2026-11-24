@@ -76,7 +76,11 @@ def load_local_env_files() -> None:
                     continue
                 key, value = line.split("=", 1)
                 key = key.strip()
-                value = value.strip().strip('"').strip("'")
+                value = value.strip()
+                # Strip unquoted inline comments (e.g. `KEY=value # comment`).
+                if value and value[0] not in ('"', "'") and " #" in value:
+                    value = value.split(" #", 1)[0].strip()
+                value = value.strip('"').strip("'").strip()
                 if not key or key in os.environ:
                     continue
                 if any(value.upper().startswith(prefix) for prefix in _PLACEHOLDER_PREFIXES):
@@ -88,10 +92,15 @@ def load_local_env_files() -> None:
 
 
 def _clean_env_secret(name: str) -> str:
-    val = os.getenv(name, "").strip()
+    val = os.getenv(name, "").strip().strip('"').strip("'").strip()
     if not val or any(val.upper().startswith(prefix) for prefix in _PLACEHOLDER_PREFIXES):
         return ""
     return val
+
+
+def is_valid_google_client_id(client_id: str) -> bool:
+    """Verify the value matches Google OAuth 2.0 Client ID format (*.apps.googleusercontent.com)."""
+    return bool(client_id) and client_id.endswith(".apps.googleusercontent.com") and " " not in client_id
 
 
 def get_google_oauth_config(request_origin: str) -> Dict[str, Any]:
@@ -100,15 +109,24 @@ def get_google_oauth_config(request_origin: str) -> Dict[str, Any]:
     client_id = _clean_env_secret("GOOGLE_CLIENT_ID")
     client_secret = _clean_env_secret("GOOGLE_CLIENT_SECRET")
 
+    app_url = _clean_env_secret("APP_URL").rstrip("/")
     explicit_redirect = _clean_env_secret("GOOGLE_APP_REDIRECT_URI")
-    if explicit_redirect:
+
+    is_explicit_local = bool(
+        explicit_redirect
+        and ("localhost" in explicit_redirect.lower() or "127.0.0.1" in explicit_redirect)
+    )
+
+    if explicit_redirect and not (app_url and is_explicit_local):
         redirect_uri = explicit_redirect
+    elif app_url:
+        redirect_uri = f"{app_url}/auth/google/callback"
     else:
         origin = request_origin.rstrip("/")
         redirect_uri = f"{origin}/auth/google/callback"
 
     return {
-        "configured": bool(client_id and client_secret),
+        "configured": bool(is_valid_google_client_id(client_id) and client_secret),
         "redirect_uri": redirect_uri,
     }
 
@@ -123,6 +141,12 @@ def _require_google_credentials(request_origin: str) -> Tuple[str, str, str]:
             "Google Cloud Console OAuth credentials are not configured yet. "
             "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your .env (or backend/.env) "
             f"and add {cfg['redirect_uri']} as an Authorized Redirect URI in Google Cloud Console."
+        )
+    if not is_valid_google_client_id(client_id):
+        raise GoogleOAuthConfigError(
+            "GOOGLE_CLIENT_ID is not a valid OAuth 2.0 Client ID (it must end with .apps.googleusercontent.com). "
+            "A Google API Key (AIza...) cannot be used for Sign in with Google — create an OAuth 2.0 Client ID "
+            "(Application type: Web application) under Google Cloud Console → APIs & Services → Credentials."
         )
     return client_id, client_secret, str(cfg["redirect_uri"])
 

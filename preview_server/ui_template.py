@@ -2039,8 +2039,15 @@ APP_HTML = """<!doctype html>
         detailModal.classList.add("hidden");
       }
 
-      function renderGoogleSetupGuide(redirectUri) {
+      function renderGoogleSetupGuide(redirectUri, detailMessage) {
         googleHelp.replaceChildren();
+        if (detailMessage && detailMessage.includes("not a valid OAuth 2.0 Client ID")) {
+          const errP = document.createElement("p");
+          errP.style.color = "var(--reject-hover)";
+          errP.style.fontWeight = "600";
+          errP.textContent = detailMessage;
+          googleHelp.appendChild(errP);
+        }
         const p1 = document.createElement("p");
         p1.append(
           document.createTextNode("Google OAuth is ready once "),
