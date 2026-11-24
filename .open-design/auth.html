@@ -827,6 +827,13 @@
             console.log('No OAuth callback, initializing normally...');
             init();
         }
+        
+        // Clear OAuth parameters from URL after handling
+        if (window.location.search) {
+            setTimeout(() => {
+                window.history.replaceState({}, document.title, '/auth.html');
+            }, 100);
+        }
     </script>
 </body>
 </html>

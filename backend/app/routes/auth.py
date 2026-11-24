@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import secrets
@@ -21,6 +22,8 @@ from app.database import get_db
 from app.middleware.auth import auth_error, extract_bearer_token, get_current_session
 from app.models.session import OAuthState, Session as UserSession, User, utc_now
 from app.models.task import GoogleOAuthToken
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -169,8 +172,10 @@ def auth_signin(
             )
         )
         db.commit()
+        logger.info(f"✅ OAuth state stored: {state[:20]}... for redirect_uri: {target_redirect_uri}")
     except Exception as exc:
         db.rollback()
+        logger.error(f"❌ Failed to store OAuth state: {exc}")
         raise auth_error(
             500,
             "state_storage_failed",
@@ -189,22 +194,34 @@ def auth_callback(
 ) -> Dict[str, Any]:
     """Validate CSRF state, exchange Google auth code, verify ID token, and issue an opaque session."""
     if error:
+        logger.error(f"❌ OAuth denied: {error}")
         raise auth_error(400, "oauth_denied", f"Google authorization failed: {error}")
 
     if not code or not code.strip():
+        logger.error("❌ Missing authorization code")
         raise auth_error(400, "missing_code", "Authorization code parameter is required")
 
     if not state or not state.strip():
+        logger.error("❌ Missing state parameter")
         raise auth_error(400, "missing_state", "State parameter is required for CSRF protection")
 
     client_id, client_secret, _, expiry_days = _get_oauth_settings()
+    logger.info(f"🔍 Callback received - state: {state[:20]}..., code: {code[:20]}...")
 
     # Strictly validate and consume single-use CSRF state token.
     now = utc_now()
     stored_state = (
         db.query(OAuthState).filter(OAuthState.state == state.strip()).first()
     )
+    
+    # Debug: log all states in DB
+    all_states = db.query(OAuthState).all()
+    logger.info(f"📋 Total states in DB: {len(all_states)}")
+    for s in all_states:
+        logger.info(f"   State: {s.state[:20]}..., Expires: {s.expires_at}, Now: {now}")
+    
     if stored_state is None or stored_state.expires_at <= now:
+        logger.error(f"❌ State not found or expired. Stored: {stored_state}, Now: {now}")
         if stored_state is not None:
             db.delete(stored_state)
             db.commit()
@@ -214,16 +231,21 @@ def auth_callback(
             "State token is invalid, expired, or already used",
         )
 
+    logger.info(f"✅ State validated, redirect_uri: {stored_state.redirect_uri}")
     redirect_uri = stored_state.redirect_uri
     # Consume state immediately to prevent replay attacks.
     db.delete(stored_state)
     db.commit()
+    logger.info("✅ State consumed")
 
     # Exchange authorization code for Google OIDC ID token.
     try:
+        logger.info(f"🔄 Exchanging code for token with redirect_uri: {redirect_uri}")
         flow = _build_google_flow(client_id, client_secret, redirect_uri)
         token_response = flow.fetch_token(code=code.strip())
+        logger.info("✅ Token exchanged successfully")
     except Exception as exc:
+        logger.error(f"❌ Failed to exchange code: {exc}")
         raise auth_error(
             400,
             "invalid_code",
