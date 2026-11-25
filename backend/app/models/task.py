@@ -45,9 +45,52 @@ class GoogleOAuthToken(Base):
 
     def has_gmail_readonly(self) -> bool:
         scopes = set(self.scope_list())
-        return (
-            "https://www.googleapis.com/auth/gmail.readonly" in scopes
-            or "gmail.readonly" in scopes
+        return bool(
+            scopes.intersection(
+                {
+                    "https://www.googleapis.com/auth/gmail.readonly",
+                    "https://www.googleapis.com/auth/gmail.modify",
+                    "https://mail.google.com/",
+                    "gmail.readonly",
+                    "gmail.modify",
+                }
+            )
+        )
+
+    def has_gmail_modify(self) -> bool:
+        scopes = set(self.scope_list())
+        return bool(
+            scopes.intersection(
+                {
+                    "https://www.googleapis.com/auth/gmail.modify",
+                    "https://mail.google.com/",
+                    "gmail.modify",
+                }
+            )
+        )
+
+    def has_gmail_send(self) -> bool:
+        scopes = set(self.scope_list())
+        return bool(
+            scopes.intersection(
+                {
+                    "https://www.googleapis.com/auth/gmail.send",
+                    "https://mail.google.com/",
+                    "gmail.send",
+                }
+            )
+        )
+
+    def has_calendar_events(self) -> bool:
+        scopes = set(self.scope_list())
+        return bool(
+            scopes.intersection(
+                {
+                    "https://www.googleapis.com/auth/calendar.events",
+                    "https://www.googleapis.com/auth/calendar",
+                    "calendar.events",
+                }
+            )
         )
 
 

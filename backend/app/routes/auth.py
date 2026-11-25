@@ -29,6 +29,9 @@ from app.middleware.auth import (
 )
 from app.models.session import OAuthState, Session as UserSession, User, utc_now
 from app.models.task import GoogleOAuthToken
+from app.services.email_analyzer import is_ai_configured
+from app.services.google_actions import get_processed_folder_name
+from app.services.payment_executor import is_payment_gateway_configured
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +42,17 @@ os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+GMAIL_MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
+GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+CALENDAR_EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events"
 OAUTH_SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
     GMAIL_READONLY_SCOPE,
+    GMAIL_MODIFY_SCOPE,
+    GMAIL_SEND_SCOPE,
+    CALENDAR_EVENTS_SCOPE,
 ]
 STATE_TTL_MINUTES = 10
 
@@ -547,7 +556,7 @@ def auth_logout(
 def auth_me(
     current_session: UserSession = Depends(get_current_session),
 ) -> Dict[str, Any]:
-    """Return the authenticated user's profile, session expiry, and Gmail scope status."""
+    """Return the authenticated user's profile, session expiry, and capability flags."""
     user = current_session.user
     token_record = user.google_token
     return {
@@ -559,4 +568,12 @@ def auth_me(
         "expires_at": _format_iso_utc(current_session.expires_at),
         "granted_scopes": token_record.scope_list() if token_record else ["openid", "email", "profile"],
         "google_reconnect_required": bool(token_record.needs_reconnect) if token_record else False,
+        "capabilities": {
+            "gmail_modify": token_record.has_gmail_modify() if token_record else False,
+            "gmail_send": token_record.has_gmail_send() if token_record else False,
+            "calendar_events": token_record.has_calendar_events() if token_record else False,
+            "ai_configured": is_ai_configured(),
+            "payment_configured": is_payment_gateway_configured(),
+            "processed_folder": get_processed_folder_name(),
+        },
     }

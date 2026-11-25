@@ -22,8 +22,13 @@ from sqlalchemy.orm import Session as DBSession
 
 from app.core.encryption import decrypt_secret, encrypt_secret
 from app.database import SessionLocal
-from app.models.session import Session as UserSession, utc_now
+from app.models.session import Session as UserSession, User, utc_now
 from app.models.task import GoogleOAuthToken, Task
+from app.services.email_analyzer import (
+    EmailAnalysisError,
+    analyze_email_with_gemini,
+    is_ai_configured,
+)
 from app.services.invite_parser import (
     _extract_headers,
     _strip_html,
@@ -256,6 +261,8 @@ def _parse_regular_inbox_email(full_message: Dict[str, Any], msg_id: str) -> Dic
         "raw_data": {
             "gmail_message_id": msg_id,
             "gmail_thread_id": full_message.get("threadId"),
+            "message_id_header": headers.get("message-id"),
+            "reply_to": headers.get("reply-to") or sender,
             "organizer": sender,
             "attendees": recipients,
             "calendar_event_link": first_safe_url,
@@ -263,6 +270,18 @@ def _parse_regular_inbox_email(full_message: Dict[str, Any], msg_id: str) -> Dic
             "date": headers.get("date"),
         },
     }
+
+
+def _parse_iso_naive_utc(raw: Optional[str]) -> Optional[datetime]:
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except ValueError:
+        return None
 
 
 class GmailPollingService:
@@ -360,6 +379,11 @@ class GmailPollingService:
             .all()
         }
 
+        user_record = db.query(User).filter(User.id == user_id).first()
+        user_name = user_record.name if user_record else None
+        user_email = user_record.email if user_record else None
+        ai_enabled = is_ai_configured()
+
         for stub in message_stubs:
             msg_id = str(stub.get("id") or "").strip()
             if not msg_id:
@@ -380,8 +404,10 @@ class GmailPollingService:
                 logger.warning("Skipping Gmail message %s due to fetch error", msg_id)
                 continue
 
+            payload = full_message.get("payload") or {}
+            msg_headers = _extract_headers(payload)
             extra_ics: List[str] = []
-            for attachment_id in _find_ics_attachment_ids(full_message.get("payload") or {}):
+            for attachment_id in _find_ics_attachment_ids(payload):
                 try:
                     att = (
                         gmail.users()
@@ -398,41 +424,86 @@ class GmailPollingService:
             extracted = parse_gmail_invite_message(full_message, extra_ics_payloads=extra_ics)
             now = utc_now()
             if extracted is not None:
-                db.add(
-                    Task(
-                        id=str(uuid.uuid4()),
-                        user_id=user_id,
-                        title=extracted.title,
-                        description=extracted.description,
-                        scheduled_for=extracted.scheduled_for,
-                        source=extracted.source,
-                        status="pending",
-                        external_message_id=extracted.external_message_id,
-                        raw_data=extracted.raw_data,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
+                raw_data = dict(extracted.raw_data or {})
+                raw_data.setdefault("gmail_message_id", msg_id)
+                raw_data.setdefault("gmail_thread_id", full_message.get("threadId"))
+                raw_data["message_id_header"] = msg_headers.get("message-id")
+                raw_data["reply_to"] = msg_headers.get("reply-to") or msg_headers.get("from") or extracted.organizer
+                task_title = extracted.title
+                task_description = extracted.description
+                task_scheduled_for = extracted.scheduled_for
+                task_source = extracted.source
+                ext_msg_id = extracted.external_message_id
+                existing_cal = {
+                    "title": extracted.title,
+                    "start_iso": (
+                        extracted.scheduled_for.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+                        if extracted.scheduled_for
+                        else ""
+                    ),
+                    "end_iso": raw_data.get("end_time") or "",
+                    "location": raw_data.get("location") or "",
+                    "description": extracted.description,
+                    "attendees": extracted.attendees,
+                }
             elif self._include_general_emails:
                 email_task = _parse_regular_inbox_email(full_message, msg_id)
-                db.add(
-                    Task(
-                        id=str(uuid.uuid4()),
-                        user_id=user_id,
-                        title=email_task["title"],
-                        description=email_task["description"],
-                        scheduled_for=email_task["scheduled_for"],
-                        source=email_task["source"],
-                        status="pending",
-                        external_message_id=email_task["external_message_id"],
-                        raw_data=email_task["raw_data"],
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
+                raw_data = dict(email_task["raw_data"])
+                task_title = email_task["title"]
+                task_description = email_task["description"]
+                task_scheduled_for = email_task["scheduled_for"]
+                task_source = email_task["source"]
+                ext_msg_id = email_task["external_message_id"]
+                existing_cal = None
             else:
                 ignored_non_invites += 1
                 continue
+
+            if ai_enabled:
+                received_iso = (
+                    task_scheduled_for.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+                    if task_scheduled_for
+                    else None
+                )
+                try:
+                    analysis = analyze_email_with_gemini(
+                        subject=task_title,
+                        sender=str(raw_data.get("organizer") or msg_headers.get("from") or "Unknown Sender"),
+                        body=task_description,
+                        received_at_iso=received_iso,
+                        reply_to=raw_data.get("reply_to"),
+                        existing_calendar=existing_cal,
+                        user_name=user_name,
+                        user_email=user_email,
+                    )
+                    raw_data["ai_analysis"] = analysis
+                    raw_data.pop("ai_analysis_error", None)
+                    cal_info = analysis.get("calendar_event") or {}
+                    if analysis.get("requires_calendar") and cal_info.get("start_iso"):
+                        parsed_start = _parse_iso_naive_utc(cal_info.get("start_iso"))
+                        if parsed_start is not None:
+                            task_scheduled_for = parsed_start
+                        if task_source != "calendar":
+                            task_source = "calendar"
+                except EmailAnalysisError as exc:
+                    logger.warning("AI analysis skipped for msg_id=%s: %s", msg_id, exc)
+                    raw_data["ai_analysis_error"] = str(exc)
+
+            db.add(
+                Task(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    title=task_title,
+                    description=task_description,
+                    scheduled_for=task_scheduled_for,
+                    source=task_source,
+                    status="pending",
+                    external_message_id=ext_msg_id,
+                    raw_data=raw_data,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
 
             existing_ids.add(msg_id)
             created_count += 1

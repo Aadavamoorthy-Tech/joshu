@@ -23,6 +23,7 @@
             --success: #34a853;
             --warning: #fbbc04;
             --danger: #ea4335;
+            --purple: #a78bfa;
             --spacing-xs: 8px;
             --spacing-sm: 12px;
             --spacing-md: 16px;
@@ -44,10 +45,12 @@
         .header {
             background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
             border-bottom: 1px solid var(--border-color);
-            padding: var(--spacing-lg);
+            padding: var(--spacing-md) var(--spacing-lg);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: var(--spacing-md);
+            flex-wrap: wrap;
         }
 
         .logo {
@@ -59,8 +62,9 @@
 
         .header-actions {
             display: flex;
-            gap: var(--spacing-md);
+            gap: var(--spacing-sm);
             align-items: center;
+            flex-wrap: wrap;
         }
 
         .user-info {
@@ -70,8 +74,8 @@
         }
 
         .avatar {
-            width: 40px;
-            height: 40px;
+            width: 38px;
+            height: 38px;
             border-radius: 50%;
             background: var(--accent-primary);
             display: flex;
@@ -96,6 +100,27 @@
             max-width: 1200px;
             margin: 0 auto;
             padding: var(--spacing-lg);
+        }
+
+        /* Capability Notice */
+        .capability-bar {
+            display: none;
+            max-width: 1200px;
+            margin: var(--spacing-md) auto 0;
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--radius-md);
+            background: rgba(251, 188, 4, 0.1);
+            border: 1px solid rgba(251, 188, 4, 0.35);
+            color: #fde68a;
+            font-size: 13px;
+            justify-content: space-between;
+            align-items: center;
+            gap: var(--spacing-md);
+            flex-wrap: wrap;
+        }
+
+        .capability-bar.visible {
+            display: flex;
         }
 
         /* Stats Bar */
@@ -173,75 +198,152 @@
 
         .task-item:hover {
             border-color: var(--accent-primary);
-            background: var(--bg-tertiary);
+            background: #1f2636;
         }
 
         .task-header {
             display: flex;
             justify-content: space-between;
-            align-items: start;
-            margin-bottom: var(--spacing-sm);
+            align-items: flex-start;
+            gap: var(--spacing-sm);
+            margin-bottom: var(--spacing-xs);
         }
 
         .task-title {
             font-weight: 600;
+            font-size: 16px;
             color: var(--text-primary);
         }
 
-        .task-status {
-            font-size: 12px;
-            padding: 4px 8px;
+        .badge-group {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+
+        .task-status,
+        .action-badge {
+            font-size: 11px;
+            padding: 3px 8px;
             border-radius: var(--radius-sm);
             text-transform: uppercase;
-            font-weight: 500;
-            letter-spacing: 0.5px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
         }
 
         .status-pending {
-            background: rgba(251, 188, 4, 0.1);
+            background: rgba(251, 188, 4, 0.12);
             color: var(--warning);
         }
 
         .status-approved {
-            background: rgba(52, 168, 83, 0.1);
+            background: rgba(52, 168, 83, 0.15);
             color: var(--success);
         }
 
         .status-rejected {
-            background: rgba(234, 67, 53, 0.1);
+            background: rgba(234, 67, 53, 0.15);
             color: var(--danger);
         }
 
+        .cat-reply_needed {
+            background: rgba(74, 158, 255, 0.16);
+            color: var(--accent-primary);
+        }
+
+        .cat-payment_request {
+            background: rgba(251, 188, 4, 0.18);
+            color: #fcd34d;
+        }
+
+        .cat-meeting_invite,
+        .cat-meeting_rsvp {
+            background: rgba(167, 139, 250, 0.18);
+            color: var(--purple);
+        }
+
+        .cat-informational {
+            background: rgba(154, 160, 166, 0.16);
+            color: var(--text-secondary);
+        }
+
         .task-meta {
-            font-size: 13px;
+            font-size: 12.5px;
             color: var(--text-secondary);
             margin-bottom: var(--spacing-sm);
         }
 
         .task-description {
             color: var(--text-secondary);
-            font-size: 14px;
-            margin-bottom: var(--spacing-md);
-            line-height: 1.6;
+            font-size: 13.5px;
+            margin-bottom: var(--spacing-sm);
+            line-height: 1.55;
+        }
+
+        .ai-prompt-box {
+            background: rgba(74, 158, 255, 0.08);
+            border: 1px solid rgba(74, 158, 255, 0.25);
+            border-radius: var(--radius-sm);
+            padding: 10px 12px;
+            margin-bottom: var(--spacing-sm);
+        }
+
+        .ai-prompt-question {
+            color: var(--text-primary);
+            font-size: 13.5px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .ai-preview-detail {
+            color: var(--text-secondary);
+            font-size: 12.5px;
+            white-space: pre-wrap;
+        }
+
+        .execution-receipt {
+            background: rgba(52, 168, 83, 0.08);
+            border: 1px solid rgba(52, 168, 83, 0.28);
+            border-radius: var(--radius-sm);
+            padding: 8px 12px;
+            margin-bottom: var(--spacing-sm);
+            font-size: 12.5px;
+            color: #a7f3d0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .execution-receipt a {
+            color: var(--accent-primary);
+            text-decoration: underline;
         }
 
         .task-actions {
             display: flex;
-            gap: var(--spacing-sm);
+            gap: var(--spacing-xs);
             justify-content: flex-end;
+            flex-wrap: wrap;
+            margin-top: var(--spacing-xs);
         }
 
         /* Buttons */
         .btn {
-            padding: var(--spacing-sm) var(--spacing-md);
+            padding: 8px 14px;
             border: none;
             border-radius: var(--radius-sm);
-            font-size: 13px;
-            font-weight: 500;
+            font-size: 12px;
+            font-weight: 600;
             cursor: pointer;
             transition: all 0.2s;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.45px;
+        }
+
+        .btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
         }
 
         .btn-primary {
@@ -249,28 +351,38 @@
             color: white;
         }
 
-        .btn-primary:hover {
+        .btn-primary:hover:not(:disabled) {
             background: var(--accent-hover);
         }
 
         .btn-success {
-            background: rgba(52, 168, 83, 0.15);
-            color: var(--success);
-            border: 1px solid rgba(52, 168, 83, 0.3);
+            background: rgba(52, 168, 83, 0.18);
+            color: #6ee7b7;
+            border: 1px solid rgba(52, 168, 83, 0.4);
         }
 
-        .btn-success:hover {
-            background: rgba(52, 168, 83, 0.25);
+        .btn-success:hover:not(:disabled) {
+            background: rgba(52, 168, 83, 0.28);
+        }
+
+        .btn-warning {
+            background: rgba(251, 188, 4, 0.18);
+            color: #fde68a;
+            border: 1px solid rgba(251, 188, 4, 0.45);
+        }
+
+        .btn-warning:hover:not(:disabled) {
+            background: rgba(251, 188, 4, 0.28);
         }
 
         .btn-danger {
             background: rgba(234, 67, 53, 0.15);
-            color: var(--danger);
-            border: 1px solid rgba(234, 67, 53, 0.3);
+            color: #fca5a5;
+            border: 1px solid rgba(234, 67, 53, 0.35);
         }
 
-        .btn-danger:hover {
-            background: rgba(234, 67, 53, 0.25);
+        .btn-danger:hover:not(:disabled) {
+            background: rgba(234, 67, 53, 0.26);
         }
 
         .btn-secondary {
@@ -279,18 +391,18 @@
             border: 1px solid var(--border-color);
         }
 
-        .btn-secondary:hover {
+        .btn-secondary:hover:not(:disabled) {
             background: var(--border-color);
         }
 
         .btn-signin {
             background: var(--accent-primary);
             color: white;
-            padding: var(--spacing-md) var(--spacing-lg);
-            font-size: 14px;
+            padding: var(--spacing-sm) var(--spacing-lg);
+            font-size: 13px;
         }
 
-        .btn-signin:hover {
+        .btn-signin:hover:not(:disabled) {
             background: var(--accent-hover);
         }
 
@@ -310,7 +422,7 @@
             border: 1px solid var(--border-color);
             border-radius: var(--radius-lg);
             padding: var(--spacing-xl);
-            max-width: 400px;
+            max-width: 420px;
         }
 
         .auth-title {
@@ -349,10 +461,9 @@
         .sync-status {
             display: flex;
             align-items: center;
-            gap: var(--spacing-sm);
+            gap: 6px;
             font-size: 12px;
             color: var(--text-secondary);
-            margin-bottom: var(--spacing-lg);
         }
 
         .sync-indicator {
@@ -381,10 +492,11 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.74);
             z-index: 1000;
             align-items: center;
             justify-content: center;
+            padding: var(--spacing-md);
         }
 
         .modal.active {
@@ -395,39 +507,112 @@
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             border-radius: var(--radius-lg);
-            padding: var(--spacing-xl);
-            max-width: 500px;
-            max-height: 80vh;
+            padding: var(--spacing-lg);
+            width: 100%;
+            max-width: 660px;
+            max-height: 88vh;
             overflow-y: auto;
         }
 
         .modal-header {
             font-size: 20px;
             font-weight: 600;
-            margin-bottom: var(--spacing-lg);
+            margin-bottom: var(--spacing-md);
             color: var(--text-primary);
+        }
+
+        .modal-section {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: var(--spacing-md);
+            margin-top: var(--spacing-md);
+        }
+
+        .modal-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--spacing-sm);
+            margin-bottom: var(--spacing-sm);
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: var(--accent-primary);
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: var(--text-primary);
+            cursor: pointer;
+            text-transform: none;
+            letter-spacing: 0;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--spacing-sm);
+        }
+
+        .form-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: var(--spacing-xs);
+        }
+
+        .form-field.full {
+            grid-column: 1 / -1;
+        }
+
+        .form-label {
+            font-size: 11.5px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+
+        .form-input,
+        .form-textarea {
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 13.5px;
+            padding: 8px 10px;
+        }
+
+        .form-textarea {
+            min-height: 110px;
+            resize: vertical;
+            line-height: 1.5;
+        }
+
+        .form-input:focus,
+        .form-textarea:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+        }
+
+        .payment-warning {
+            font-size: 12px;
+            color: #fde68a;
+            margin-top: 6px;
         }
 
         .modal-footer {
             display: flex;
-            gap: var(--spacing-md);
+            gap: var(--spacing-xs);
             justify-content: flex-end;
+            flex-wrap: wrap;
             margin-top: var(--spacing-lg);
-        }
-
-        /* Loading */
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 2px solid var(--border-color);
-            border-top-color: var(--accent-primary);
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
         }
 
         /* Inline Status Banner */
@@ -462,6 +647,12 @@
             color: #b8d8ff;
         }
 
+        .status-banner.success {
+            background: rgba(52, 168, 83, 0.14);
+            border-color: rgba(52, 168, 83, 0.4);
+            color: #a7f3d0;
+        }
+
         .status-banner-close {
             background: none;
             border: none;
@@ -478,11 +669,12 @@
     <div class="header">
         <div class="logo">Joshu</div>
         <div class="header-actions">
-            <div id="syncStatus" class="sync-status" style="display: none; margin-bottom: 0;">
+            <div id="syncStatus" class="sync-status" style="display: none;">
                 <div class="sync-indicator" id="syncIndicator"></div>
                 <span id="syncLabel">Synced</span>
             </div>
             <button id="syncNowBtn" class="btn btn-secondary" style="display: none;">Sync Inbox</button>
+            <button id="analyzeAllBtn" class="btn btn-primary" style="display: none;">Analyze Emails</button>
             <div id="userInfo" class="user-info" style="display: none;">
                 <div class="avatar" id="userAvatar">J</div>
                 <div>
@@ -493,6 +685,11 @@
             <button id="signInBtn" class="btn btn-signin">Sign In with Google</button>
             <button id="logoutBtn" class="btn btn-secondary" style="display: none;">Logout</button>
         </div>
+    </div>
+
+    <div id="capabilityBar" class="capability-bar">
+        <span id="capabilityText"></span>
+        <button id="reconnectGoogleBtn" class="btn btn-warning" type="button">Reconnect Google</button>
     </div>
 
     <div id="statusBanner" class="status-banner" role="alert">
@@ -533,9 +730,9 @@
         <!-- Tasks -->
         <div class="task-list" id="taskList">
             <div class="empty-state">
-                <div class="empty-state-icon">📧</div>
+                <div class="empty-state-icon">✓</div>
                 <div class="empty-state-title">No tasks yet</div>
-                <p>Your approved and rejected meeting invitations will appear here.</p>
+                <p>Click Sync Inbox to fetch and analyze your messages.</p>
             </div>
         </div>
     </div>
@@ -546,21 +743,22 @@
             <div class="auth-title">Joshu</div>
             <div class="auth-subtitle">Personal AI Chief of Staff</div>
             <p style="color: var(--text-secondary); margin-bottom: var(--spacing-lg); font-size: 14px;">
-                Manage your meeting invitations and tasks in one place.
+                AI-powered inbox triage, drafted replies, automatic payments, Google Calendar scheduling, and smart inbox archiving.
             </p>
             <button id="authSignInBtn" class="btn btn-signin" style="width: 100%;">Sign In with Google</button>
         </div>
     </div>
 
-    <!-- Task Detail Modal -->
+    <!-- Task Detail & Action Execution Modal -->
     <div class="modal" id="taskModal">
         <div class="modal-content">
             <div class="modal-header" id="modalTitle"></div>
             <div id="modalBody"></div>
             <div class="modal-footer">
+                <button class="btn btn-secondary" id="reanalyzeBtnModal" type="button">Analyze with AI</button>
                 <button class="btn btn-secondary" id="closeModalBtn" type="button">Close</button>
-                <button class="btn btn-danger" id="rejectBtnModal" type="button">Reject</button>
-                <button class="btn btn-success" id="approveBtnModal" type="button">Approve</button>
+                <button class="btn btn-danger" id="rejectBtnModal" type="button">Reject &amp; Archive</button>
+                <button class="btn btn-success" id="approveBtnModal" type="button">Approve &amp; Execute</button>
             </div>
         </div>
     </div>
@@ -570,6 +768,7 @@
         let sessionToken = null;
         let isAuthenticated = false;
         let currentUser = null;
+        let capabilities = null;
         let currentTaskId = null;
         let currentFilter = 'all';
         let tasks = [];
@@ -618,6 +817,32 @@
             document.getElementById('statusBannerText').textContent = '';
         }
 
+        function updateCapabilityBanner() {
+            const bar = document.getElementById('capabilityBar');
+            const textEl = document.getElementById('capabilityText');
+            const reconnectBtn = document.getElementById('reconnectGoogleBtn');
+            if (!isAuthenticated || !capabilities) {
+                bar.classList.remove('visible');
+                return;
+            }
+            const missingScopes = [];
+            if (!capabilities.gmail_send) missingScopes.push('Gmail Send');
+            if (!capabilities.gmail_modify) missingScopes.push('Gmail Mark-Read/Folder Move');
+            if (!capabilities.calendar_events) missingScopes.push('Google Calendar');
+
+            if (missingScopes.length > 0) {
+                textEl.textContent = `Reconnect Google once to grant ${missingScopes.join(', ')} permissions for automatic execution.`;
+                reconnectBtn.style.display = 'inline-block';
+                bar.classList.add('visible');
+            } else if (!capabilities.ai_configured) {
+                textEl.textContent = 'Add GEMINI_API_KEY in backend/.env and restart the backend to enable automatic email comprehension and reply drafting.';
+                reconnectBtn.style.display = 'none';
+                bar.classList.add('visible');
+            } else {
+                bar.classList.remove('visible');
+            }
+        }
+
         async function parseJsonSafe(response) {
             const raw = await response.text();
             if (!raw) return {};
@@ -634,11 +859,14 @@
 
             document.getElementById('signInBtn').addEventListener('click', startSignIn);
             document.getElementById('authSignInBtn').addEventListener('click', startSignIn);
+            document.getElementById('reconnectGoogleBtn').addEventListener('click', startSignIn);
             document.getElementById('logoutBtn').addEventListener('click', logout);
             document.getElementById('syncNowBtn').addEventListener('click', () => syncInboxNow(false));
+            document.getElementById('analyzeAllBtn').addEventListener('click', analyzePendingEmails);
             document.getElementById('statusBannerClose').addEventListener('click', hideBanner);
             document.getElementById('closeModalBtn').addEventListener('click', closeModal);
-            document.getElementById('approveBtnModal').addEventListener('click', approveCurrentTask);
+            document.getElementById('reanalyzeBtnModal').addEventListener('click', reanalyzeCurrentTask);
+            document.getElementById('approveBtnModal').addEventListener('click', approveCurrentTaskFromModal);
             document.getElementById('rejectBtnModal').addEventListener('click', rejectCurrentTask);
 
             document.getElementById('taskModal').addEventListener('click', (e) => {
@@ -675,8 +903,9 @@
             const signInButtons = [
                 document.getElementById('signInBtn'),
                 document.getElementById('authSignInBtn'),
+                document.getElementById('reconnectGoogleBtn'),
             ];
-            signInButtons.forEach((b) => { b.disabled = true; });
+            signInButtons.forEach((b) => { if (b) b.disabled = true; });
 
             try {
                 const redirectUri = `${window.location.origin}/auth.html`;
@@ -702,7 +931,7 @@
             } catch (error) {
                 showBanner('Failed to start sign-in process: ' + error.message, 'error');
             } finally {
-                signInButtons.forEach((b) => { b.disabled = false; });
+                signInButtons.forEach((b) => { if (b) b.disabled = false; });
             }
         }
 
@@ -722,6 +951,7 @@
                     currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
                     updateHeader();
                     showMainContent();
+                    await fetchCapabilities();
                     await syncInboxNow(true);
                 } else {
                     showBanner('Authentication failed: ' + (data.message || 'Invalid sign-in code.'), 'error');
@@ -752,6 +982,7 @@
                     currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
                     updateHeader();
                     showMainContent();
+                    await fetchCapabilities();
                     await syncInboxNow(true);
                 } else {
                     showBanner('Authentication failed: ' + (data.message || 'Unexpected response from server.'), 'error');
@@ -765,6 +996,20 @@
             }
         }
 
+        async function fetchCapabilities() {
+            try {
+                const res = await fetch(`${apiBase}/auth/me`, {
+                    credentials: 'include',
+                    headers: buildAuthHeaders(),
+                });
+                if (res.ok) {
+                    const data = await parseJsonSafe(res);
+                    capabilities = data.capabilities || null;
+                    updateCapabilityBanner();
+                }
+            } catch (_) {}
+        }
+
         async function restoreSession() {
             try {
                 const response = await fetch(`${apiBase}/auth/me`, {
@@ -775,14 +1020,18 @@
                     isAuthenticated = false;
                     sessionToken = null;
                     currentUser = null;
+                    capabilities = null;
+                    updateCapabilityBanner();
                     showAuthContainer();
                     return false;
                 }
                 const data = await parseJsonSafe(response);
                 isAuthenticated = true;
                 currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
+                capabilities = data.capabilities || null;
                 updateHeader();
                 showMainContent();
+                updateCapabilityBanner();
                 await loadTasks();
                 if (tasks.length === 0) {
                     await syncInboxNow(true);
@@ -862,6 +1111,65 @@
             }
         }
 
+        async function analyzePendingEmails() {
+            if (!isAuthenticated) return;
+            hideBanner();
+            const btn = document.getElementById('analyzeAllBtn');
+            btn.disabled = true;
+            setSyncState(true, 'Analyzing...');
+            try {
+                const response = await fetch(`${apiBase}/tasks/analyze-pending`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: buildAuthHeaders(),
+                });
+                const data = await parseJsonSafe(response);
+                if (!response.ok) {
+                    showBanner(data.message || 'Could not analyze emails right now.', 'error');
+                    setSyncState(false, 'Synced');
+                    return;
+                }
+                await loadTasks();
+                const count = Number(data.analyzed || 0);
+                showBanner(
+                    count > 0
+                        ? `AI analyzed ${count} email${count === 1 ? '' : 's'} and prepared action recommendations.`
+                        : 'All pending emails are already analyzed.',
+                    'success'
+                );
+            } catch (error) {
+                showBanner('AI analysis failed: ' + error.message, 'error');
+                setSyncState(false, 'Synced');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function analyzeSingleTask(taskId) {
+            if (!isAuthenticated) return null;
+            setSyncState(true, 'Analyzing...');
+            try {
+                const response = await fetch(`${apiBase}/tasks/${encodeURIComponent(taskId)}/analyze`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: buildAuthHeaders(),
+                });
+                const data = await parseJsonSafe(response);
+                if (!response.ok) {
+                    showBanner(data.message || 'AI analysis failed.', 'error');
+                    setSyncState(false, 'Synced');
+                    return null;
+                }
+                await loadTasks();
+                showBanner('Email analyzed and action plan updated.', 'success');
+                return data.task || null;
+            } catch (error) {
+                showBanner('AI analysis failed: ' + error.message, 'error');
+                setSyncState(false, 'Synced');
+                return null;
+            }
+        }
+
         function computeCounts(list) {
             return {
                 all: list.length,
@@ -877,6 +1185,7 @@
                 const email = String(currentUser.email || '');
                 document.getElementById('userInfo').style.display = 'flex';
                 document.getElementById('syncNowBtn').style.display = 'inline-block';
+                document.getElementById('analyzeAllBtn').style.display = 'inline-block';
                 document.getElementById('signInBtn').style.display = 'none';
                 document.getElementById('logoutBtn').style.display = 'inline-block';
                 document.getElementById('userName').textContent = displayName;
@@ -906,8 +1215,102 @@
             return `${dt.toLocaleDateString()} at ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
         }
 
+        function toLocalDateTimeInputValue(iso) {
+            if (!iso) return '';
+            const dt = new Date(iso);
+            if (Number.isNaN(dt.getTime())) return '';
+            const pad = (n) => String(n).padStart(2, '0');
+            return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+        }
+
+        function fromLocalDateTimeInputValue(val) {
+            if (!val) return null;
+            const dt = new Date(val);
+            if (Number.isNaN(dt.getTime())) return null;
+            return dt.toISOString();
+        }
+
         function normalizeStatus(status) {
             return ['pending', 'approved', 'rejected'].includes(status) ? status : 'pending';
+        }
+
+        function getCategoryMeta(task) {
+            const ai = task.ai_analysis || null;
+            const category = (ai && ai.category) || task.action_category || 'informational';
+            const labels = {
+                reply_needed: 'Reply Drafted',
+                payment_request: 'Payment Request',
+                meeting_invite: 'Meeting · Calendar',
+                meeting_rsvp: 'RSVP + Calendar',
+                informational: 'Review',
+            };
+            return {
+                category: labels[category] ? category : 'informational',
+                label: labels[category] || 'Review',
+            };
+        }
+
+        function getPrimaryApproveLabel(task) {
+            const ai = task.ai_analysis;
+            if (ai) {
+                if (ai.requires_rsvp) return 'Send RSVP & Add to Calendar';
+                if (ai.requires_payment) {
+                    const amt = ai.payment && Number(ai.payment.amount) > 0
+                        ? `${Number(ai.payment.amount).toFixed(2)} ${ai.payment.currency || 'USD'}`
+                        : 'Payment';
+                    return `Approve & Pay ${amt}`;
+                }
+                if (ai.requires_calendar) return 'Add to Calendar';
+                if (ai.requires_reply) return 'Send Reply';
+                return 'Approve & Archive';
+            }
+            if (task.source === 'calendar') return 'Add to Calendar';
+            return 'Approve & Archive';
+        }
+
+        function renderExecutionReceipt(container, log) {
+            if (!log || typeof log !== 'object') return;
+            const entries = [];
+            if (log.reply && log.reply.sent) {
+                entries.push({ text: `✓ Reply sent to ${log.reply.to}` });
+            }
+            if (log.calendar && log.calendar.created) {
+                entries.push({
+                    text: `✓ Added to Google Calendar (${formatSchedule(log.calendar.start)})`,
+                    link: log.calendar.html_link,
+                    linkLabel: 'Open in Calendar',
+                });
+            }
+            if (log.payment && log.payment.executed) {
+                entries.push({
+                    text: `✓ Payment executed: ${Number(log.payment.amount).toFixed(2)} ${log.payment.currency} to ${log.payment.payee_name} (${log.payment.payment_id})`,
+                });
+            }
+            if (log.gmail_archive && log.gmail_archive.processed) {
+                entries.push({
+                    text: `✓ Marked read & moved out of Inbox to ${log.gmail_archive.folder}`,
+                });
+            }
+            if (!entries.length) return;
+
+            const box = document.createElement('div');
+            box.className = 'execution-receipt';
+            entries.forEach((entry) => {
+                const row = document.createElement('div');
+                row.appendChild(document.createTextNode(entry.text));
+                if (entry.link && /^https:\/\//i.test(entry.link)) {
+                    row.appendChild(document.createTextNode(' · '));
+                    const a = document.createElement('a');
+                    a.href = entry.link;
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                    a.textContent = entry.linkLabel || 'View';
+                    a.addEventListener('click', (e) => e.stopPropagation());
+                    row.appendChild(a);
+                }
+                box.appendChild(row);
+            });
+            container.appendChild(box);
         }
 
         function renderFilteredTasks() {
@@ -944,6 +1347,9 @@
 
             tasksToShow.forEach((task) => {
                 const status = normalizeStatus(task.status);
+                const catMeta = getCategoryMeta(task);
+                const ai = task.ai_analysis || null;
+
                 const item = document.createElement('div');
                 item.className = 'task-item';
                 item.addEventListener('click', () => openTaskModal(task.id));
@@ -955,11 +1361,19 @@
                 titleEl.className = 'task-title';
                 titleEl.textContent = task.title || '(No Subject)';
 
+                const badgeGroup = document.createElement('div');
+                badgeGroup.className = 'badge-group';
+
+                const catEl = document.createElement('div');
+                catEl.className = `action-badge cat-${catMeta.category}`;
+                catEl.textContent = catMeta.label;
+
                 const statusEl = document.createElement('div');
                 statusEl.className = `task-status status-${status}`;
                 statusEl.textContent = status;
 
-                header.append(titleEl, statusEl);
+                badgeGroup.append(catEl, statusEl);
+                header.append(titleEl, badgeGroup);
 
                 const metaEl = document.createElement('div');
                 metaEl.className = 'task-meta';
@@ -968,12 +1382,70 @@
 
                 const descEl = document.createElement('div');
                 descEl.className = 'task-description';
-                descEl.textContent = task.snippet || task.description || '';
+                descEl.textContent = (ai && ai.summary) || task.snippet || task.description || '';
+
+                item.append(header, metaEl, descEl);
+
+                if (status === 'pending' && ai) {
+                    const promptBox = document.createElement('div');
+                    promptBox.className = 'ai-prompt-box';
+
+                    const qEl = document.createElement('div');
+                    qEl.className = 'ai-prompt-question';
+                    qEl.textContent = ai.recommended_action || task.recommended_action || 'Approve this action?';
+                    promptBox.appendChild(qEl);
+
+                    const details = [];
+                    if (ai.requires_payment && ai.payment) {
+                        const amt = Number(ai.payment.amount || 0).toFixed(2);
+                        details.push(`Payment: ${amt} ${ai.payment.currency || 'USD'} to ${ai.payment.payee_name || 'Vendor'}${ai.payment.invoice_number ? ` (Invoice ${ai.payment.invoice_number})` : ''}`);
+                    }
+                    if (ai.requires_calendar && ai.calendar_event) {
+                        details.push(`Calendar: ${ai.calendar_event.title || task.title} · ${formatSchedule(ai.calendar_event.start_iso || task.scheduled_for)}`);
+                    }
+                    if ((ai.requires_reply || ai.requires_rsvp) && ai.draft_reply && ai.draft_reply.body) {
+                        const preview = ai.draft_reply.body.length > 160
+                            ? `${ai.draft_reply.body.slice(0, 160)}...`
+                            : ai.draft_reply.body;
+                        details.push(`Draft to ${ai.draft_reply.to || task.organizer}: "${preview}"`);
+                    }
+                    if (details.length) {
+                        const detailEl = document.createElement('div');
+                        detailEl.className = 'ai-preview-detail';
+                        detailEl.textContent = details.join('\n');
+                        promptBox.appendChild(detailEl);
+                    }
+                    item.appendChild(promptBox);
+                }
+
+                renderExecutionReceipt(item, task.execution_log);
 
                 const actionsEl = document.createElement('div');
                 actionsEl.className = 'task-actions';
 
                 if (status === 'pending') {
+                    if (!ai) {
+                        const analyzeBtn = document.createElement('button');
+                        analyzeBtn.className = 'btn btn-secondary';
+                        analyzeBtn.type = 'button';
+                        analyzeBtn.textContent = 'Analyze with AI';
+                        analyzeBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            analyzeSingleTask(task.id);
+                        });
+                        actionsEl.appendChild(analyzeBtn);
+                    } else {
+                        const reviewBtn = document.createElement('button');
+                        reviewBtn.className = 'btn btn-secondary';
+                        reviewBtn.type = 'button';
+                        reviewBtn.textContent = ai.requires_reply || ai.requires_rsvp ? 'Review / Edit Draft' : 'Review Details';
+                        reviewBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            openTaskModal(task.id);
+                        });
+                        actionsEl.appendChild(reviewBtn);
+                    }
+
                     const rejectBtn = document.createElement('button');
                     rejectBtn.className = 'btn btn-danger';
                     rejectBtn.type = 'button';
@@ -984,18 +1456,23 @@
                     });
 
                     const approveBtn = document.createElement('button');
-                    approveBtn.className = 'btn btn-success';
+                    approveBtn.className = ai && ai.requires_payment ? 'btn btn-warning' : 'btn btn-success';
                     approveBtn.type = 'button';
-                    approveBtn.textContent = 'Approve';
+                    approveBtn.textContent = getPrimaryApproveLabel(task);
                     approveBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        approveTask(task.id);
+                        // Payments always open the confirmation modal first so the user verifies payee & amount.
+                        if (ai && ai.requires_payment) {
+                            openTaskModal(task.id);
+                            return;
+                        }
+                        approveTask(task.id, null);
                     });
 
                     actionsEl.append(rejectBtn, approveBtn);
                 }
 
-                item.append(header, metaEl, descEl, actionsEl);
+                item.appendChild(actionsEl);
                 list.appendChild(item);
             });
         }
@@ -1009,39 +1486,61 @@
             renderFilteredTasks();
         }
 
-        async function approveTask(taskId) {
+        async function approveTask(taskId, payload = null) {
+            hideBanner();
+            setSyncState(true, 'Executing...');
             try {
-                const response = await fetch(`${apiBase}/tasks/${encodeURIComponent(taskId)}/approve`, {
+                const options = {
                     method: 'POST',
                     credentials: 'include',
-                    headers: buildAuthHeaders(),
-                });
+                    headers: buildAuthHeaders(payload ? { 'Content-Type': 'application/json' } : {}),
+                };
+                if (payload) {
+                    options.body = JSON.stringify(payload);
+                }
+                const response = await fetch(`${apiBase}/tasks/${encodeURIComponent(taskId)}/approve`, options);
+                const data = await parseJsonSafe(response);
                 if (!response.ok) {
-                    const data = await parseJsonSafe(response);
-                    showBanner(data.message || 'Failed to approve task.', 'error');
-                    return;
+                    setSyncState(false, 'Synced');
+                    showBanner(data.message || 'Failed to execute approved action.', 'error');
+                    if (data.error === 'scope_upgrade_required') {
+                        await fetchCapabilities();
+                    }
+                    return false;
                 }
                 await loadTasks();
+                showBanner(data.message || 'Action completed successfully.', 'success');
+                return true;
             } catch (error) {
-                showBanner('Failed to approve task: ' + error.message, 'error');
+                setSyncState(false, 'Synced');
+                showBanner('Failed to execute action: ' + error.message, 'error');
+                return false;
             }
         }
 
         async function rejectTask(taskId) {
+            hideBanner();
+            setSyncState(true, 'Archiving...');
             try {
                 const response = await fetch(`${apiBase}/tasks/${encodeURIComponent(taskId)}/reject`, {
                     method: 'POST',
                     credentials: 'include',
-                    headers: buildAuthHeaders(),
+                    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ mark_read_and_move: true }),
                 });
+                const data = await parseJsonSafe(response);
                 if (!response.ok) {
-                    const data = await parseJsonSafe(response);
+                    setSyncState(false, 'Synced');
                     showBanner(data.message || 'Failed to reject task.', 'error');
-                    return;
+                    return false;
                 }
                 await loadTasks();
+                showBanner(data.message || 'Task rejected and archived.', 'info');
+                return true;
             } catch (error) {
+                setSyncState(false, 'Synced');
                 showBanner('Failed to reject task: ' + error.message, 'error');
+                return false;
             }
         }
 
@@ -1055,11 +1554,24 @@
             container.appendChild(p);
         }
 
+        function createField(labelText, inputEl, fullWidth = false) {
+            const wrap = document.createElement('div');
+            wrap.className = fullWidth ? 'form-field full' : 'form-field';
+            const lbl = document.createElement('label');
+            lbl.className = 'form-label';
+            lbl.textContent = labelText;
+            wrap.append(lbl, inputEl);
+            return wrap;
+        }
+
         function openTaskModal(taskId) {
             const task = tasks.find((t) => t.id === taskId);
             if (!task) return;
 
             currentTaskId = taskId;
+            const ai = task.ai_analysis || null;
+            const isPending = task.status === 'pending';
+
             document.getElementById('modalTitle').textContent = task.title || '(No Subject)';
 
             const body = document.getElementById('modalBody');
@@ -1067,19 +1579,25 @@
 
             const wrapper = document.createElement('div');
             wrapper.style.color = 'var(--text-secondary)';
-            wrapper.style.fontSize = '14px';
+            wrapper.style.fontSize = '13.5px';
 
             appendDetailRow(wrapper, 'Status', normalizeStatus(task.status));
-            appendDetailRow(wrapper, 'Scheduled', formatSchedule(task.scheduled_for));
-            appendDetailRow(wrapper, 'Source', String(task.source || 'email'));
+            appendDetailRow(wrapper, 'Action Type', getCategoryMeta(task).label);
+            appendDetailRow(wrapper, 'Date / Schedule', formatSchedule(task.scheduled_for));
             if (task.organizer) {
                 appendDetailRow(wrapper, 'From', String(task.organizer));
+            }
+            if (ai && ai.summary) {
+                appendDetailRow(wrapper, 'AI Summary', ai.summary);
+            }
+            if (task.ai_analysis_error) {
+                appendDetailRow(wrapper, 'AI Notice', task.ai_analysis_error);
             }
             if (task.calendar_event_link && /^https:\/\//i.test(task.calendar_event_link)) {
                 const linkRow = document.createElement('p');
                 linkRow.style.marginBottom = '6px';
                 const strong = document.createElement('strong');
-                strong.textContent = 'Link: ';
+                strong.textContent = 'Calendar / Event Link: ';
                 const anchor = document.createElement('a');
                 anchor.href = task.calendar_event_link;
                 anchor.target = '_blank';
@@ -1090,30 +1608,217 @@
                 wrapper.appendChild(linkRow);
             }
 
-            const descLabel = document.createElement('p');
-            descLabel.style.marginTop = 'var(--spacing-md)';
-            const strongDesc = document.createElement('strong');
-            strongDesc.textContent = 'Description:';
-            descLabel.appendChild(strongDesc);
+            renderExecutionReceipt(wrapper, task.execution_log);
 
+            // Original email message section
+            const emailSection = document.createElement('div');
+            emailSection.className = 'modal-section';
+            const emailHeader = document.createElement('div');
+            emailHeader.className = 'modal-section-header';
+            emailHeader.textContent = 'Original Email Content';
             const descText = document.createElement('p');
             descText.style.whiteSpace = 'pre-wrap';
-            descText.style.marginTop = '4px';
+            descText.style.maxHeight = '140px';
+            descText.style.overflowY = 'auto';
+            descText.style.color = 'var(--text-secondary)';
             descText.textContent = task.description || 'No message body.';
+            emailSection.append(emailHeader, descText);
+            wrapper.appendChild(emailSection);
 
-            wrapper.append(descLabel, descText);
+            if (isPending) {
+                const raw = task.raw_data || {};
+
+                // 1. Draft Reply / RSVP Section
+                const replyDefaultOn = Boolean(ai && (ai.requires_reply || ai.requires_rsvp));
+                const draft = (ai && ai.draft_reply) || {};
+                const replySection = document.createElement('div');
+                replySection.className = 'modal-section';
+
+                const replyHead = document.createElement('div');
+                replyHead.className = 'modal-section-header';
+                const replyToggleLabel = document.createElement('label');
+                replyToggleLabel.className = 'checkbox-label';
+                const replyCheck = document.createElement('input');
+                replyCheck.type = 'checkbox';
+                replyCheck.id = 'modalSendReplyCheck';
+                replyCheck.checked = replyDefaultOn;
+                replyToggleLabel.append(replyCheck, document.createTextNode(ai && ai.requires_rsvp ? 'Send RSVP Reply Email' : 'Send Drafted Reply Email'));
+                replyHead.appendChild(replyToggleLabel);
+                replySection.appendChild(replyHead);
+
+                const replyGrid = document.createElement('div');
+                replyGrid.className = 'form-grid';
+
+                const toInput = document.createElement('input');
+                toInput.className = 'form-input';
+                toInput.id = 'modalReplyTo';
+                toInput.value = draft.to || raw.reply_to || task.organizer || '';
+
+                const subjInput = document.createElement('input');
+                subjInput.className = 'form-input';
+                subjInput.id = 'modalReplySubject';
+                subjInput.value = draft.subject || (task.title && task.title.toLowerCase().startsWith('re:') ? task.title : `Re: ${task.title || ''}`);
+
+                const bodyArea = document.createElement('textarea');
+                bodyArea.className = 'form-textarea';
+                bodyArea.id = 'modalReplyBody';
+                bodyArea.placeholder = 'Write or edit the email reply to send on approval...';
+                bodyArea.value = draft.body || '';
+
+                replyGrid.append(
+                    createField('To', toInput),
+                    createField('Subject', subjInput),
+                    createField('Draft Message', bodyArea, true)
+                );
+                replySection.appendChild(replyGrid);
+                wrapper.appendChild(replySection);
+
+                // 2. Google Calendar Section
+                const calDefaultOn = Boolean((ai && (ai.requires_calendar || ai.requires_rsvp)) || task.source === 'calendar');
+                const cal = (ai && ai.calendar_event) || {};
+                const calSection = document.createElement('div');
+                calSection.className = 'modal-section';
+
+                const calHead = document.createElement('div');
+                calHead.className = 'modal-section-header';
+                const calToggleLabel = document.createElement('label');
+                calToggleLabel.className = 'checkbox-label';
+                const calCheck = document.createElement('input');
+                calCheck.type = 'checkbox';
+                calCheck.id = 'modalAddCalendarCheck';
+                calCheck.checked = calDefaultOn;
+                calToggleLabel.append(calCheck, document.createTextNode('Add Meeting to Google Calendar'));
+                calHead.appendChild(calToggleLabel);
+                calSection.appendChild(calHead);
+
+                const calGrid = document.createElement('div');
+                calGrid.className = 'form-grid';
+
+                const calTitleInput = document.createElement('input');
+                calTitleInput.className = 'form-input';
+                calTitleInput.id = 'modalCalTitle';
+                calTitleInput.value = cal.title || task.title || '';
+
+                const calLocInput = document.createElement('input');
+                calLocInput.className = 'form-input';
+                calLocInput.id = 'modalCalLocation';
+                calLocInput.value = cal.location || raw.location || '';
+
+                const calStartInput = document.createElement('input');
+                calStartInput.className = 'form-input';
+                calStartInput.type = 'datetime-local';
+                calStartInput.id = 'modalCalStart';
+                calStartInput.value = toLocalDateTimeInputValue(cal.start_iso || task.scheduled_for);
+
+                const calEndInput = document.createElement('input');
+                calEndInput.className = 'form-input';
+                calEndInput.type = 'datetime-local';
+                calEndInput.id = 'modalCalEnd';
+                calEndInput.value = toLocalDateTimeInputValue(cal.end_iso || raw.end_time);
+
+                calGrid.append(
+                    createField('Event Title', calTitleInput),
+                    createField('Location / Link', calLocInput),
+                    createField('Start Date & Time', calStartInput),
+                    createField('End Date & Time', calEndInput)
+                );
+                calSection.appendChild(calGrid);
+                wrapper.appendChild(calSection);
+
+                // 3. Automatic Payment Section
+                const payDefaultOn = Boolean(ai && ai.requires_payment);
+                const pay = (ai && ai.payment) || {};
+                const paySection = document.createElement('div');
+                paySection.className = 'modal-section';
+
+                const payHead = document.createElement('div');
+                payHead.className = 'modal-section-header';
+                const payToggleLabel = document.createElement('label');
+                payToggleLabel.className = 'checkbox-label';
+                const payCheck = document.createElement('input');
+                payCheck.type = 'checkbox';
+                payCheck.id = 'modalExecutePaymentCheck';
+                payCheck.checked = payDefaultOn;
+                payToggleLabel.append(payCheck, document.createTextNode('Execute Payment Automatically'));
+                payHead.appendChild(payToggleLabel);
+                paySection.appendChild(payHead);
+
+                const payGrid = document.createElement('div');
+                payGrid.className = 'form-grid';
+
+                const payeeInput = document.createElement('input');
+                payeeInput.className = 'form-input';
+                payeeInput.id = 'modalPayee';
+                payeeInput.value = pay.payee_name || task.organizer || '';
+
+                const amtInput = document.createElement('input');
+                amtInput.className = 'form-input';
+                amtInput.type = 'number';
+                amtInput.step = '0.01';
+                amtInput.min = '0';
+                amtInput.id = 'modalPayAmount';
+                amtInput.value = pay.amount && Number(pay.amount) > 0 ? String(pay.amount) : '';
+
+                const curInput = document.createElement('input');
+                curInput.className = 'form-input';
+                curInput.id = 'modalPayCurrency';
+                curInput.maxLength = 3;
+                curInput.value = pay.currency || 'USD';
+
+                const invInput = document.createElement('input');
+                invInput.className = 'form-input';
+                invInput.readOnly = true;
+                invInput.value = pay.invoice_number || pay.payment_reference || 'N/A';
+
+                payGrid.append(
+                    createField('Payee', payeeInput),
+                    createField('Amount', amtInput),
+                    createField('Currency', curInput),
+                    createField('Invoice / Ref', invInput)
+                );
+                paySection.appendChild(payGrid);
+
+                const warnEl = document.createElement('div');
+                warnEl.className = 'payment-warning';
+                warnEl.textContent = 'When checked, approving immediately submits this payment through your configured payment gateway with duplicate-charge protection.';
+                paySection.appendChild(warnEl);
+                wrapper.appendChild(paySection);
+
+                // 4. Inbox Cleanup Section
+                const archiveSection = document.createElement('div');
+                archiveSection.className = 'modal-section';
+                const archiveLabel = document.createElement('label');
+                archiveLabel.className = 'checkbox-label';
+                const archiveCheck = document.createElement('input');
+                archiveCheck.type = 'checkbox';
+                archiveCheck.id = 'modalArchiveCheck';
+                archiveCheck.checked = true;
+                const folderName = (ai && ai.target_folder) || (capabilities && capabilities.processed_folder) || 'Joshu/Processed';
+                archiveLabel.append(
+                    archiveCheck,
+                    document.createTextNode(`Mark email as read and move out of Inbox to "${folderName}"`)
+                );
+                archiveSection.appendChild(archiveLabel);
+                wrapper.appendChild(archiveSection);
+            }
+
             body.appendChild(wrapper);
 
             const modal = document.getElementById('taskModal');
             const approveBtn = document.getElementById('approveBtnModal');
             const rejectBtn = document.getElementById('rejectBtnModal');
+            const reanalyzeBtn = document.getElementById('reanalyzeBtnModal');
 
-            if (task.status === 'pending') {
+            if (isPending) {
                 approveBtn.style.display = 'inline-block';
+                approveBtn.textContent = getPrimaryApproveLabel(task);
+                approveBtn.className = ai && ai.requires_payment ? 'btn btn-warning' : 'btn btn-success';
                 rejectBtn.style.display = 'inline-block';
+                reanalyzeBtn.style.display = 'inline-block';
             } else {
                 approveBtn.style.display = 'none';
                 rejectBtn.style.display = 'none';
+                reanalyzeBtn.style.display = 'none';
             }
 
             modal.classList.add('active');
@@ -1124,19 +1829,78 @@
             currentTaskId = null;
         }
 
-        function approveCurrentTask() {
-            if (currentTaskId) {
-                const id = currentTaskId;
-                closeModal();
-                approveTask(id);
+        async function reanalyzeCurrentTask() {
+            if (!currentTaskId) return;
+            const id = currentTaskId;
+            const btn = document.getElementById('reanalyzeBtnModal');
+            btn.disabled = true;
+            try {
+                const updated = await analyzeSingleTask(id);
+                if (updated) {
+                    openTaskModal(id);
+                }
+            } finally {
+                btn.disabled = false;
             }
         }
 
-        function rejectCurrentTask() {
-            if (currentTaskId) {
-                const id = currentTaskId;
-                closeModal();
-                rejectTask(id);
+        async function approveCurrentTaskFromModal() {
+            if (!currentTaskId) return;
+            const id = currentTaskId;
+            const sendReply = Boolean(document.getElementById('modalSendReplyCheck')?.checked);
+            const addCalendar = Boolean(document.getElementById('modalAddCalendarCheck')?.checked);
+            const executePayment = Boolean(document.getElementById('modalExecutePaymentCheck')?.checked);
+            const markReadAndMove = Boolean(document.getElementById('modalArchiveCheck')?.checked);
+
+            const payload = {
+                send_reply: sendReply,
+                add_to_calendar: addCalendar,
+                execute_payment: executePayment,
+                mark_read_and_move: markReadAndMove,
+            };
+
+            if (sendReply) {
+                payload.reply_to = document.getElementById('modalReplyTo')?.value?.trim() || null;
+                payload.reply_subject = document.getElementById('modalReplySubject')?.value?.trim() || null;
+                payload.reply_body = document.getElementById('modalReplyBody')?.value || '';
+            }
+            if (addCalendar) {
+                payload.calendar_title = document.getElementById('modalCalTitle')?.value?.trim() || null;
+                payload.calendar_location = document.getElementById('modalCalLocation')?.value?.trim() || '';
+                payload.calendar_start_iso = fromLocalDateTimeInputValue(document.getElementById('modalCalStart')?.value);
+                payload.calendar_end_iso = fromLocalDateTimeInputValue(document.getElementById('modalCalEnd')?.value);
+            }
+            if (executePayment) {
+                const amtVal = parseFloat(document.getElementById('modalPayAmount')?.value || '0');
+                if (!Number.isFinite(amtVal) || amtVal <= 0) {
+                    showBanner('Please enter a valid positive payment amount before approving.', 'error');
+                    return;
+                }
+                payload.payment_amount = amtVal;
+                payload.payment_currency = (document.getElementById('modalPayCurrency')?.value || 'USD').trim().toUpperCase();
+                payload.payment_payee = document.getElementById('modalPayee')?.value?.trim() || null;
+            }
+
+            const btn = document.getElementById('approveBtnModal');
+            btn.disabled = true;
+            try {
+                const ok = await approveTask(id, payload);
+                if (ok) closeModal();
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function rejectCurrentTask() {
+            if (!currentTaskId) return;
+            const id = currentTaskId;
+            const btn = document.getElementById('rejectBtnModal');
+            btn.disabled = true;
+            try {
+                const ok = await rejectTask(id);
+                if (ok) closeModal();
+            } finally {
+                btn.disabled = false;
             }
         }
 
@@ -1146,7 +1910,9 @@
             sessionToken = null;
             isAuthenticated = false;
             currentUser = null;
+            capabilities = null;
             tasks = [];
+            updateCapabilityBanner();
             try { localStorage.removeItem('sessionToken'); } catch (_) {}
 
             if (wasSignedIn) {
@@ -1167,8 +1933,10 @@
             document.getElementById('userInfo').style.display = 'none';
             document.getElementById('syncStatus').style.display = 'none';
             document.getElementById('syncNowBtn').style.display = 'none';
+            document.getElementById('analyzeAllBtn').style.display = 'none';
             document.getElementById('signInBtn').style.display = 'inline-block';
             document.getElementById('logoutBtn').style.display = 'none';
+            document.getElementById('capabilityBar').classList.remove('visible');
         }
 
         function showMainContent() {
