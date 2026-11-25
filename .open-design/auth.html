@@ -913,8 +913,10 @@
         let currentTaskId = null;
         let currentFilter = 'all';
         let tasks = [];
+        let pendingAnalysisCount = 0;
         let listenersBound = false;
         let autoRefreshTimer = null;
+        let currentRefreshMs = 30000;
 
         // Clear any legacy token previously saved in localStorage
         try { localStorage.removeItem('sessionToken'); } catch (_) {}
@@ -1125,7 +1127,10 @@
                     showMainContent();
                     startAutoRefresh();
                     await fetchCapabilities();
-                    await syncInboxNow(true);
+                    await loadTasks();
+                    if (tasks.length === 0 && pendingAnalysisCount === 0) {
+                        await syncInboxNow(true);
+                    }
                 } else {
                     showBanner('Authentication failed: ' + (data.message || 'Invalid sign-in code.'), 'error');
                     showAuthContainer();
@@ -1157,7 +1162,10 @@
                     showMainContent();
                     startAutoRefresh();
                     await fetchCapabilities();
-                    await syncInboxNow(true);
+                    await loadTasks();
+                    if (tasks.length === 0 && pendingAnalysisCount === 0) {
+                        await syncInboxNow(true);
+                    }
                 } else {
                     showBanner('Authentication failed: ' + (data.message || 'Unexpected response from server.'), 'error');
                     showAuthContainer();
@@ -1170,14 +1178,16 @@
             }
         }
 
-        function startAutoRefresh() {
+        function startAutoRefresh(intervalMs = 30000) {
+            if (autoRefreshTimer !== null && currentRefreshMs === intervalMs) return;
             stopAutoRefresh();
+            currentRefreshMs = intervalMs;
             autoRefreshTimer = window.setInterval(() => {
                 if (!isAuthenticated) return;
                 const modal = document.getElementById('taskModal');
                 if (modal && modal.classList.contains('active')) return;
                 loadTasks(true);
-            }, 45000);
+            }, intervalMs);
         }
 
         function stopAutoRefresh() {
@@ -1226,8 +1236,7 @@
                 updateCapabilityBanner();
                 startAutoRefresh();
                 await loadTasks();
-                const hasUnanalyzedPending = tasks.some((t) => t.status === 'pending' && !t.ai_analysis);
-                if (tasks.length === 0 || (hasUnanalyzedPending && (!capabilities || capabilities.ai_configured !== false))) {
+                if (tasks.length === 0 && pendingAnalysisCount === 0) {
                     await syncInboxNow(true);
                 }
                 return true;
@@ -1241,9 +1250,9 @@
 
         async function loadTasks(silent = false) {
             if (!isAuthenticated) return;
-            if (!silent) setSyncState(true, 'Loading...');
+            if (!silent) setSyncState(true, 'Loading reviews...');
             try {
-                const response = await fetch(`${apiBase}/tasks?limit=100`, {
+                const response = await fetch(`${apiBase}/tasks?limit=100&analyzed_only=true`, {
                     credentials: 'include',
                     headers: buildAuthHeaders(),
                 });
@@ -1253,9 +1262,19 @@
                 }
                 const data = await parseJsonSafe(response);
                 tasks = Array.isArray(data.tasks) ? data.tasks : [];
+                pendingAnalysisCount = Number(data.pending_analysis_count || 0);
                 updateStats(data.counts || computeCounts(tasks));
                 renderFilteredTasks();
-                setSyncState(false, 'Synced');
+                if (pendingAnalysisCount > 0) {
+                    setSyncState(
+                        true,
+                        `Analyzing ${pendingAnalysisCount} email${pendingAnalysisCount === 1 ? '' : 's'} in background…`
+                    );
+                    startAutoRefresh(4000);
+                } else {
+                    setSyncState(false, 'Synced');
+                    startAutoRefresh(30000);
+                }
             } catch (error) {
                 if (!silent) {
                     setSyncState(false, 'Sync error');
@@ -1389,22 +1408,49 @@
             };
         }
 
+        function formatPaymentAmount(amount, currency) {
+            const num = Number(amount);
+            const cur = String(currency || 'INR').trim().toUpperCase();
+            if (!Number.isFinite(num) || num <= 0) return '';
+            if (cur === 'INR') {
+                return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            }
+            return `${num.toFixed(2)} ${cur}`;
+        }
+
         function getPrimaryApproveLabel(task) {
             const ai = task.ai_analysis;
             if (ai) {
-                if (ai.requires_rsvp) return 'Send RSVP & Add to Calendar';
-                if (ai.requires_payment) {
-                    const amt = ai.payment && Number(ai.payment.amount) > 0
-                        ? `${Number(ai.payment.amount).toFixed(2)} ${ai.payment.currency || 'INR'}`
-                        : 'Payment';
-                    return `Approve & Pay ${amt}`;
+                if (ai.requires_rsvp || ai.category === 'meeting_rsvp') {
+                    return 'Send RSVP & Add to Calendar';
                 }
-                if (ai.requires_calendar) return 'Add to Calendar';
-                if (ai.requires_reply) return 'Send Reply';
-                return 'Approve & Archive';
+                if (ai.requires_payment || ai.category === 'payment_request') {
+                    const formatted = ai.payment ? formatPaymentAmount(ai.payment.amount, ai.payment.currency) : '';
+                    return formatted ? `Pay ${formatted}` : 'Pay Now';
+                }
+                if (ai.requires_calendar || ai.category === 'meeting_invite') {
+                    if (ai.requires_reply) return 'Send RSVP & Add to Calendar';
+                    return 'Add to Calendar';
+                }
+                if (ai.requires_reply || ai.category === 'reply_needed') {
+                    return 'Send Reply';
+                }
+                return 'Mark Read & Archive';
             }
             if (task.source === 'calendar') return 'Add to Calendar';
-            return 'Approve & Archive';
+            return 'Mark Read & Archive';
+        }
+
+        function getReviewButtonLabel(task) {
+            const ai = task.ai_analysis;
+            if (ai) {
+                if (ai.requires_rsvp || ai.category === 'meeting_rsvp') return 'Edit RSVP Draft';
+                if (ai.requires_payment || ai.category === 'payment_request') return 'Review Payment';
+                if (ai.requires_calendar || ai.category === 'meeting_invite') return 'Review Meeting';
+                if (ai.requires_reply || ai.category === 'reply_needed') return 'Edit Reply Draft';
+                return 'View Email';
+            }
+            return 'View Email';
         }
 
         function cleanPreviewText(raw, maxLen = 220) {
@@ -1474,16 +1520,21 @@
                 const empty = document.createElement('div');
                 empty.className = 'empty-state';
 
+                const isPreparing =
+                    pendingAnalysisCount > 0 && (currentFilter === 'all' || currentFilter === 'pending');
+
                 const icon = document.createElement('div');
                 icon.className = 'empty-state-icon';
-                icon.textContent = '✓';
+                icon.textContent = isPreparing ? '⏳' : '✓';
 
                 const title = document.createElement('div');
                 title.className = 'empty-state-title';
-                title.textContent = 'All caught up!';
+                title.textContent = isPreparing ? 'Preparing your inbox reviews…' : 'All caught up!';
 
                 const desc = document.createElement('p');
-                desc.textContent = 'No tasks to show for this filter. Click Sync Inbox to check for new messages.';
+                desc.textContent = isPreparing
+                    ? `${pendingAnalysisCount} new email${pendingAnalysisCount === 1 ? ' is' : 's are'} being analyzed automatically in the background. Reviews will appear here as soon as each one is ready.`
+                    : 'No reviews to show for this filter. New emails are analyzed automatically in the background.';
 
                 empty.append(icon, title, desc);
                 list.appendChild(empty);
@@ -1595,7 +1646,7 @@
                     const reviewBtn = document.createElement('button');
                     reviewBtn.className = 'btn btn-secondary';
                     reviewBtn.type = 'button';
-                    reviewBtn.textContent = ai && (ai.requires_reply || ai.requires_rsvp) ? 'Review / Edit Draft' : 'Review Details';
+                    reviewBtn.textContent = getReviewButtonLabel(task);
                     reviewBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
                         openTaskModal(task.id);
@@ -1611,14 +1662,15 @@
                         rejectTask(task.id);
                     });
 
+                    const isPayment = Boolean(ai && (ai.requires_payment || ai.category === 'payment_request'));
                     const approveBtn = document.createElement('button');
-                    approveBtn.className = ai && ai.requires_payment ? 'btn btn-warning' : 'btn btn-success';
+                    approveBtn.className = isPayment ? 'btn btn-warning' : 'btn btn-success';
                     approveBtn.type = 'button';
                     approveBtn.textContent = getPrimaryApproveLabel(task);
                     approveBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
                         // Payments always open the confirmation modal first so the user verifies payee & amount.
-                        if (ai && ai.requires_payment) {
+                        if (isPayment) {
                             openTaskModal(task.id);
                             return;
                         }
@@ -1984,9 +2036,39 @@
             const rejectBtn = document.getElementById('rejectBtnModal');
 
             if (isPending) {
+                const syncModalApproveButton = () => {
+                    const sendReply = Boolean(document.getElementById('modalSendReplyCheck')?.checked);
+                    const addCalendar = Boolean(document.getElementById('modalAddCalendarCheck')?.checked);
+                    const executePayment = Boolean(document.getElementById('modalExecutePaymentCheck')?.checked);
+
+                    let label = 'Mark Read & Archive';
+                    if (executePayment) {
+                        const amtVal = parseFloat(document.getElementById('modalPayAmount')?.value || '0');
+                        const curVal = document.getElementById('modalPayCurrency')?.value || 'INR';
+                        const formatted = formatPaymentAmount(amtVal, curVal);
+                        label = formatted ? `Approve & Pay ${formatted}` : 'Approve & Pay';
+                    } else if (sendReply && addCalendar) {
+                        label = 'Send RSVP & Add to Calendar';
+                    } else if (addCalendar) {
+                        label = 'Add to Calendar';
+                    } else if (sendReply) {
+                        label = 'Send Reply';
+                    }
+                    approveBtn.textContent = label;
+                    approveBtn.className = executePayment ? 'btn btn-warning' : 'btn btn-success';
+                };
+
+                ['modalSendReplyCheck', 'modalAddCalendarCheck', 'modalExecutePaymentCheck'].forEach((id) => {
+                    const el = document.getElementById(id);
+                    if (el) el.addEventListener('change', syncModalApproveButton);
+                });
+                ['modalPayAmount', 'modalPayCurrency'].forEach((id) => {
+                    const el = document.getElementById(id);
+                    if (el) el.addEventListener('input', syncModalApproveButton);
+                });
+
                 approveBtn.style.display = 'inline-block';
-                approveBtn.textContent = getPrimaryApproveLabel(task);
-                approveBtn.className = ai && ai.requires_payment ? 'btn btn-warning' : 'btn btn-success';
+                syncModalApproveButton();
                 rejectBtn.style.display = 'inline-block';
             } else {
                 approveBtn.style.display = 'none';
@@ -2081,6 +2163,7 @@
             currentUser = null;
             capabilities = null;
             tasks = [];
+            pendingAnalysisCount = 0;
             updateCapabilityBanner();
             try { localStorage.removeItem('sessionToken'); } catch (_) {}
 

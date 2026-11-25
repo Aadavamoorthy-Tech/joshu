@@ -7,6 +7,8 @@ import base64
 import logging
 import os
 import re
+import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -40,11 +42,29 @@ from app.services.invite_parser import (
 
 logger = logging.getLogger("joshu.gmail_poller")
 
-DEFAULT_POLL_INTERVAL_MINUTES = 2
+DEFAULT_POLL_INTERVAL_MINUTES = 1
+DEFAULT_POLL_INTERVAL_SECONDS = 60
+BACKGROUND_RETRY_SECONDS = 20
 DEFAULT_MAX_MESSAGES_PER_POLL = 25
 DEFAULT_GMAIL_QUERY = "in:inbox"
 FALLBACK_GMAIL_QUERY = "-in:trash -in:spam"
 _URL_PATTERN = re.compile(r"https://[^\s<>\"')\]}]+", re.IGNORECASE)
+_USER_LOCKS_GUARD = threading.Lock()
+_USER_LOCKS: Dict[int, threading.Lock] = {}
+
+
+def _get_user_lock(user_id: int) -> threading.Lock:
+    with _USER_LOCKS_GUARD:
+        lock = _USER_LOCKS.get(user_id)
+        if lock is None:
+            lock = threading.Lock()
+            _USER_LOCKS[user_id] = lock
+        return lock
+
+
+def is_user_sync_running(user_id: int) -> bool:
+    """Return True if a sync/analysis cycle is already running for this user."""
+    return _get_user_lock(user_id).locked()
 
 
 class GmailPollingError(Exception):
@@ -308,7 +328,12 @@ class GmailPollingService:
         )
 
     def poll_user_inbox(self, db: DBSession, user_id: int) -> SyncResult:
-        """Fetch Gmail inbox emails and calendar invitations for a user and insert any new tasks."""
+        """Fetch Gmail inbox emails and calendar invitations for a user and analyze them immediately."""
+        user_lock = _get_user_lock(user_id)
+        with user_lock:
+            return self._poll_user_inbox_locked(db, user_id)
+
+    def _poll_user_inbox_locked(self, db: DBSession, user_id: int) -> SyncResult:
         token_record = (
             db.query(GoogleOAuthToken)
             .filter(GoogleOAuthToken.user_id == user_id)
@@ -506,9 +531,12 @@ class GmailPollingService:
                     updated_at=now,
                 )
             )
+            db.commit()
 
             existing_ids.add(msg_id)
             created_count += 1
+            if ai_enabled:
+                time.sleep(0.25)
 
         synced_at = utc_now()
         token_record.last_synced_at = synced_at
@@ -564,11 +592,13 @@ class GmailPollingService:
             db.query(Task)
             .filter(Task.user_id == user_id, Task.status == "pending")
             .order_by(Task.created_at.desc())
-            .limit(max(1, limit))
             .all()
         )
+        max_to_analyze = max(1, limit)
         analyzed_count = 0
         for task in pending_tasks:
+            if analyzed_count >= max_to_analyze:
+                break
             raw = dict(task.raw_data) if isinstance(task.raw_data, dict) else {}
             if isinstance(raw.get("ai_analysis"), dict):
                 continue
@@ -618,16 +648,37 @@ class GmailPollingService:
                 task.updated_at = utc_now()
                 db.commit()
                 analyzed_count += 1
+                time.sleep(0.25)
             except EmailAnalysisError as exc:
                 logger.warning("Background AI analysis failed for task_id=%s: %s", task.id, exc)
                 raw["ai_analysis_error"] = str(exc)
                 task.raw_data = raw
                 flag_modified(task, "raw_data")
                 db.commit()
-                if getattr(exc, "status_code", None) in (400, 403, 404):
+                if getattr(exc, "status_code", None) in (400, 403, 404, 429):
                     break
 
         return analyzed_count
+
+    def has_unanalyzed_pending_tasks(self, db: DBSession) -> bool:
+        """Return True if any connected user still has pending tasks awaiting AI analysis."""
+        if not is_ai_configured():
+            return False
+        pending_tasks = (
+            db.query(Task)
+            .join(GoogleOAuthToken, GoogleOAuthToken.user_id == Task.user_id)
+            .filter(
+                Task.status == "pending",
+                GoogleOAuthToken.needs_reconnect.is_(False),
+            )
+            .limit(100)
+            .all()
+        )
+        for task in pending_tasks:
+            raw = task.raw_data if isinstance(task.raw_data, dict) else {}
+            if not isinstance(raw.get("ai_analysis"), dict):
+                return True
+        return False
 
     def poll_all_active_users(self, db: DBSession) -> Dict[str, Any]:
         """Poll Gmail and run AI analysis for every connected user in the background, even when logged out."""
@@ -644,6 +695,7 @@ class GmailPollingService:
             "created_tasks": 0,
             "analyzed_tasks": 0,
             "errors": 0,
+            "has_more_to_analyze": False,
         }
 
         for uid in connected_user_ids:
@@ -659,11 +711,12 @@ class GmailPollingService:
                 summary["errors"] += 1
                 logger.exception("Unexpected error during Gmail poll for user_id=%s", uid)
 
+        summary["has_more_to_analyze"] = self.has_unanalyzed_pending_tasks(db)
         return summary
 
 
 class GmailPollingScheduler:
-    """Asyncio background loop that triggers GmailPollingService on a configurable interval."""
+    """Asyncio background loop that continuously syncs Gmail and analyzes emails even when signed out."""
 
     def __init__(
         self,
@@ -692,26 +745,39 @@ class GmailPollingScheduler:
         finally:
             db.close()
 
+    def _get_effective_poll_seconds(self) -> int:
+        raw_sec = (os.getenv("GMAIL_POLL_INTERVAL_SECONDS") or "").strip()
+        if raw_sec:
+            try:
+                return max(15, int(raw_sec))
+            except ValueError:
+                pass
+        # Cap default wait at 60s so background syncing & AI review generation stays snappy on localhost.
+        return min(max(30, self._interval_minutes * 60), DEFAULT_POLL_INTERVAL_SECONDS)
+
     async def _loop(self) -> None:
-        interval_seconds = self._interval_minutes * 60
-        logger.info("Gmail polling scheduler started (interval=%dm)", self._interval_minutes)
-        # Run an initial background sync/analysis cycle shortly after startup so emails are ready immediately.
-        first_wait_seconds = 3
+        base_interval_seconds = self._get_effective_poll_seconds()
+        logger.info("Continuous background Gmail + AI scheduler started (interval=%ds)", base_interval_seconds)
+        # Run first cycle immediately (1s after startup) so reviews are ready before the user even opens the app.
+        next_wait_seconds = 1
         while not self._stop_event.is_set():
             try:
-                await asyncio.wait_for(self._stop_event.wait(), timeout=first_wait_seconds)
+                await asyncio.wait_for(self._stop_event.wait(), timeout=next_wait_seconds)
                 break
             except asyncio.TimeoutError:
-                first_wait_seconds = interval_seconds
+                next_wait_seconds = base_interval_seconds
                 try:
                     summary = await asyncio.to_thread(self._run_cycle_sync)
                     logger.info(
-                        "Gmail poll cycle complete: users=%s tasks=%s analyzed=%s errors=%s",
+                        "Background sync cycle complete: users=%s created=%s analyzed=%s more=%s errors=%s",
                         summary["polled_users"],
                         summary["created_tasks"],
                         summary.get("analyzed_tasks", 0),
+                        summary.get("has_more_to_analyze", False),
                         summary["errors"],
                     )
+                    if summary.get("has_more_to_analyze"):
+                        next_wait_seconds = BACKGROUND_RETRY_SECONDS
                 except Exception:
                     logger.exception("Gmail polling cycle encountered an unexpected error")
 

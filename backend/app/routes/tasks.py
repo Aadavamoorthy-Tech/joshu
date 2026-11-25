@@ -27,6 +27,7 @@ from app.services.gmail_poller import (
     get_poll_interval_minutes,
     gmail_polling_scheduler,
     gmail_polling_service,
+    is_user_sync_running,
 )
 from app.services.google_actions import (
     GoogleActionError,
@@ -164,6 +165,8 @@ def _get_owned_task_or_error(db: DBSession, task_id: str, user_id: int) -> Task:
 
 
 def _run_background_sync(user_id: int) -> None:
+    if is_user_sync_running(user_id):
+        return
     db = SessionLocal()
     try:
         gmail_polling_service.poll_user_inbox(db, user_id)
@@ -233,8 +236,10 @@ def _analyze_and_persist_task(db: DBSession, task: Task, user_name: str, user_em
 
 @router.get("")
 def list_tasks(
+    background_tasks: BackgroundTasks,
     status: Optional[str] = Query(default=None),
     source: Optional[str] = Query(default=None),
+    analyzed_only: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     current_session: UserSession = Depends(get_current_session),
@@ -264,20 +269,54 @@ def list_tasks(
             )
         query = query.filter(Task.source == normalized_source)
 
-    total = query.count()
-    items: List[Task] = (
-        query.order_by(Task.scheduled_for.desc(), Task.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
+    all_matching: List[Task] = (
+        query.order_by(Task.scheduled_for.desc(), Task.created_at.desc()).all()
     )
+
+    all_user_tasks: List[Task] = (
+        db.query(Task).filter(Task.user_id == current_session.user_id).all()
+    )
+    pending_analysis_count = 0
+    ready_counts = {"pending": 0, "approved": 0, "rejected": 0}
+    for t in all_user_tasks:
+        t_raw = t.raw_data if isinstance(t.raw_data, dict) else {}
+        is_analyzed = isinstance(t_raw.get("ai_analysis"), dict)
+        if t.status == "pending":
+            if is_analyzed:
+                ready_counts["pending"] += 1
+            else:
+                pending_analysis_count += 1
+                if not analyzed_only:
+                    ready_counts["pending"] += 1
+        elif t.status in ready_counts:
+            ready_counts[t.status] += 1
+    ready_counts["all"] = (
+        ready_counts["pending"] + ready_counts["approved"] + ready_counts["rejected"]
+    )
+
+    if analyzed_only:
+        filtered_items = [
+            item
+            for item in all_matching
+            if item.status != "pending"
+            or (isinstance(item.raw_data, dict) and isinstance(item.raw_data.get("ai_analysis"), dict))
+        ]
+    else:
+        filtered_items = all_matching
+
+    if pending_analysis_count > 0 and not is_user_sync_running(current_session.user_id):
+        background_tasks.add_task(_run_background_sync, current_session.user_id)
+
+    total = len(filtered_items)
+    items = filtered_items[offset : offset + limit]
 
     return {
         "tasks": [_serialize_task(item) for item in items],
         "total": total,
         "limit": limit,
         "offset": offset,
-        "counts": _status_counts_for_user(db, current_session.user_id),
+        "counts": ready_counts,
+        "pending_analysis_count": pending_analysis_count,
     }
 
 
