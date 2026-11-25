@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 
@@ -16,7 +16,7 @@ from app.services.agent_service import (
     get_or_create_agent_policy,
     list_google_services_for_user,
     process_agent_chat,
-    serialize_agent_message,
+    serialize_agent_message_list,
     serialize_agent_policy,
     sync_runtime_rules_code,
 )
@@ -26,6 +26,7 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 
 class AgentChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
+    chat_id: Optional[str] = Field(default=None, max_length=120)
 
 
 class AgentPolicyUpdateRequest(BaseModel):
@@ -55,13 +56,13 @@ def get_agent_state(
         db.query(AgentMessage)
         .filter(AgentMessage.user_id == current_session.user_id)
         .order_by(AgentMessage.created_at.asc(), AgentMessage.id.asc())
-        .limit(100)
+        .limit(200)
         .all()
     )
     return {
         "policy": serialize_agent_policy(policy),
         "google_services": list_google_services_for_user(db, current_session.user_id),
-        "messages": [serialize_agent_message(msg) for msg in messages],
+        "messages": serialize_agent_message_list(messages),
         "runtime_code": _read_runtime_code(),
     }
 
@@ -79,7 +80,12 @@ def chat_with_agent(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Prompt message cannot be empty.",
         )
-    result = process_agent_chat(db, current_session.user, cleaned)
+    result = process_agent_chat(
+        db,
+        current_session.user,
+        cleaned,
+        chat_id=payload.chat_id,
+    )
     result["runtime_code"] = _read_runtime_code()
     return result
 
@@ -119,10 +125,37 @@ def update_agent_policy(
 
 @router.delete("/history")
 def clear_agent_history(
+    chat_id: Optional[str] = Query(default=None),
+    message_id: Optional[str] = Query(default=None),
     current_session: UserSession = Depends(get_current_session),
     db: DBSession = Depends(get_db),
 ):
-    """Clear conversation history with the Joshu Agent while keeping saved policies intact."""
+    """Delete a specific chat session from history (or all if neither chat_id nor message_id is specified)."""
+    target_chat_id = (chat_id or "").strip()
+    target_msg_id = (message_id or "").strip()
+
+    if target_chat_id or target_msg_id:
+        all_msgs = (
+            db.query(AgentMessage)
+            .filter(AgentMessage.user_id == current_session.user_id)
+            .order_by(AgentMessage.created_at.asc(), AgentMessage.id.asc())
+            .all()
+        )
+        serialized = serialize_agent_message_list(all_msgs)
+        ids_to_delete = set()
+        for raw_msg, ser_msg in zip(all_msgs, serialized):
+            if (target_chat_id and ser_msg.get("chat_id") == target_chat_id) or (
+                target_msg_id and str(raw_msg.id) == target_msg_id
+            ):
+                ids_to_delete.add(raw_msg.id)
+        if ids_to_delete:
+            db.query(AgentMessage).filter(
+                AgentMessage.user_id == current_session.user_id,
+                AgentMessage.id.in_(list(ids_to_delete)),
+            ).delete(synchronize_session=False)
+            db.commit()
+        return {"status": "deleted", "deleted_count": len(ids_to_delete)}
+
     db.query(AgentMessage).filter(AgentMessage.user_id == current_session.user_id).delete(
         synchronize_session=False
     )

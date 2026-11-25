@@ -219,14 +219,42 @@ def serialize_agent_policy(policy: AgentPolicy) -> Dict[str, Any]:
     }
 
 
-def serialize_agent_message(msg: AgentMessage) -> Dict[str, Any]:
+def extract_message_chat_id(msg: AgentMessage) -> Optional[str]:
+    raw_actions = msg.actions_taken if isinstance(msg.actions_taken, list) else []
+    for item in raw_actions:
+        if isinstance(item, dict) and item.get("_chat_id"):
+            return str(item["_chat_id"])
+    return None
+
+
+def serialize_agent_message(msg: AgentMessage, fallback_chat_id: Optional[str] = None) -> Dict[str, Any]:
+    raw_actions = msg.actions_taken if isinstance(msg.actions_taken, list) else []
+    visible_actions = [
+        a for a in raw_actions if not (isinstance(a, dict) and "_chat_id" in a and len(a) == 1)
+    ]
+    cid = extract_message_chat_id(msg) or fallback_chat_id or f"chat-{msg.id}"
     return {
         "id": msg.id,
+        "chat_id": cid,
         "role": msg.role,
         "content": msg.content,
-        "actions_taken": msg.actions_taken if isinstance(msg.actions_taken, list) else [],
+        "actions_taken": visible_actions,
         "created_at": _format_utc(msg.created_at),
     }
+
+
+def serialize_agent_message_list(messages: List[AgentMessage]) -> List[Dict[str, Any]]:
+    serialized: List[Dict[str, Any]] = []
+    last_user_chat_id: Optional[str] = None
+    for msg in messages:
+        explicit_cid = extract_message_chat_id(msg)
+        if msg.role == "user":
+            last_user_chat_id = explicit_cid or f"chat-{msg.id}"
+            serialized.append(serialize_agent_message(msg, fallback_chat_id=last_user_chat_id))
+        else:
+            cid = explicit_cid or last_user_chat_id or f"chat-{msg.id}"
+            serialized.append(serialize_agent_message(msg, fallback_chat_id=cid))
+    return serialized
 
 
 def list_google_services_for_user(db: DBSession, user_id: int) -> List[Dict[str, Any]]:
@@ -859,6 +887,7 @@ def process_agent_chat(
     db: DBSession,
     user: User,
     user_message: str,
+    chat_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Process a user prompt in the Agent chatbot, execute all requested application powers, and persist the turn."""
     cleaned_msg = (user_message or "").strip()
@@ -866,14 +895,16 @@ def process_agent_chat(
         raise ValueError("Prompt message cannot be empty.")
 
     policy = get_or_create_agent_policy(db, user.id)
+    user_msg_id = str(uuid.uuid4())
+    effective_chat_id = (str(chat_id or "").strip() or f"chat-{user_msg_id}")[:120]
 
     # Save the user's prompt message
     user_msg_record = AgentMessage(
-        id=str(uuid.uuid4()),
+        id=user_msg_id,
         user_id=user.id,
         role="user",
         content=cleaned_msg,
-        actions_taken=[],
+        actions_taken=[{"_chat_id": effective_chat_id}],
         created_at=utc_now(),
     )
     db.add(user_msg_record)
@@ -1345,12 +1376,13 @@ def process_agent_chat(
             "• \"Send an email to colleague@example.com with subject ...\""
         )
 
+    stored_actions = list(actions_taken) + [{"_chat_id": effective_chat_id}]
     agent_msg_record = AgentMessage(
         id=str(uuid.uuid4()),
         user_id=user.id,
         role="agent",
         content=final_reply,
-        actions_taken=actions_taken,
+        actions_taken=stored_actions,
         created_at=utc_now(),
     )
     db.add(agent_msg_record)
@@ -1358,20 +1390,8 @@ def process_agent_chat(
     db.refresh(agent_msg_record)
 
     return {
-        "user_message": {
-            "id": user_msg_record.id,
-            "role": "user",
-            "content": user_msg_record.content,
-            "actions_taken": [],
-            "created_at": _format_utc(user_msg_record.created_at),
-        },
-        "agent_message": {
-            "id": agent_msg_record.id,
-            "role": "agent",
-            "content": agent_msg_record.content,
-            "actions_taken": agent_msg_record.actions_taken or [],
-            "created_at": _format_utc(agent_msg_record.created_at),
-        },
+        "user_message": serialize_agent_message(user_msg_record, fallback_chat_id=effective_chat_id),
+        "agent_message": serialize_agent_message(agent_msg_record, fallback_chat_id=effective_chat_id),
         "policy": serialize_agent_policy(policy),
         "google_services": list_google_services_for_user(db, user.id),
     }

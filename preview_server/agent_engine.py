@@ -222,7 +222,11 @@ def apply_policy_to_session_tasks(session: Any) -> List[Dict[str, Any]]:
     return auto_executed
 
 
-def process_preview_agent_chat(session: Any, user_prompt: str) -> Dict[str, Any]:
+def process_preview_agent_chat(
+    session: Any,
+    user_prompt: str,
+    chat_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """Process a user prompt in the preview server Agent tab."""
     policy = session.agent_policy
     lower = user_prompt.lower().strip()
@@ -338,8 +342,10 @@ def process_preview_agent_chat(session: Any, user_prompt: str) -> Dict[str, Any]
 
     now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     next_id = len(session.agent_messages) + 1
+    effective_chat_id = (str(chat_id or "").strip() or f"chat-{next_id}")[:120]
     user_msg = {
         "id": next_id,
+        "chat_id": effective_chat_id,
         "role": "user",
         "content": user_prompt,
         "actions_taken": [],
@@ -347,6 +353,7 @@ def process_preview_agent_chat(session: Any, user_prompt: str) -> Dict[str, Any]
     }
     agent_msg = {
         "id": next_id + 1,
+        "chat_id": effective_chat_id,
         "role": "assistant",
         "content": "\n\n".join(reply_parts),
         "actions_taken": actions_taken,

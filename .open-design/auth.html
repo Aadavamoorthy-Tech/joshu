@@ -201,33 +201,116 @@
             padding-right: 2px;
         }
 
-        .sidebar-history-item {
+        .sidebar-history-row {
+            position: relative;
+            display: flex;
+            align-items: center;
             width: 100%;
-            text-align: left;
-            background: transparent;
-            border: 1px solid transparent;
             border-radius: var(--radius-sm);
-            color: var(--text-secondary);
-            font-family: inherit;
-            font-size: 12.5px;
-            padding: 7px 12px;
-            cursor: pointer;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            border: 1px solid transparent;
             transition: all 0.16s ease;
         }
 
-        .sidebar-history-item:hover {
-            color: var(--text-primary);
+        .sidebar-history-row:hover {
             background: rgba(255, 255, 255, 0.04);
             border-color: rgba(255, 255, 255, 0.08);
         }
 
-        .sidebar-history-item.active {
-            color: var(--text-primary);
+        .sidebar-history-row.active {
             background: rgba(74, 158, 255, 0.1);
             border-color: rgba(74, 158, 255, 0.25);
+        }
+
+        .sidebar-history-item {
+            flex: 1;
+            min-width: 0;
+            text-align: left;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 12.5px;
+            padding: 7px 6px 7px 12px;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: color 0.16s ease;
+        }
+
+        .sidebar-history-row:hover .sidebar-history-item,
+        .sidebar-history-row.active .sidebar-history-item {
+            color: var(--text-primary);
+        }
+
+        .sidebar-history-more-btn {
+            flex-shrink: 0;
+            width: 26px;
+            height: 26px;
+            margin-right: 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 15px;
+            line-height: 1;
+            cursor: pointer;
+            opacity: 0.75;
+            transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+        }
+
+        .sidebar-history-row:hover .sidebar-history-more-btn,
+        .sidebar-history-more-btn.menu-open {
+            opacity: 1;
+            color: var(--text-primary);
+        }
+
+        .sidebar-history-more-btn:hover,
+        .sidebar-history-more-btn.menu-open {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .sidebar-history-menu {
+            position: absolute;
+            top: calc(100% + 2px);
+            right: 4px;
+            z-index: 60;
+            min-width: 132px;
+            background: #1a2130;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 8px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+            padding: 4px;
+            display: none;
+        }
+
+        .sidebar-history-menu.open {
+            display: block;
+        }
+
+        .sidebar-history-delete-btn {
+            width: 100%;
+            text-align: left;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            color: #ff6b6b;
+            font-family: inherit;
+            font-size: 12.5px;
+            font-weight: 500;
+            padding: 7px 10px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.15s ease;
+        }
+
+        .sidebar-history-delete-btn:hover {
+            background: rgba(255, 107, 107, 0.14);
         }
 
         .sidebar-history-empty {
@@ -352,35 +435,34 @@
             align-self: flex-start;
             display: inline-flex;
             align-items: center;
-            gap: 4px;
-            padding: 10px 6px;
-            transform: rotate(26deg);
+            gap: 5px;
+            padding: 12px 6px;
         }
 
         .agent-thinking-dot {
-            width: 4.5px;
-            height: 4.5px;
+            width: 5px;
+            height: 5px;
             border-radius: 50%;
             background: #e3e3e3;
-            animation: geminiDotPulse 1.25s infinite ease-in-out;
+            animation: geminiWaveBounce 1.15s infinite ease-in-out;
         }
 
         .agent-thinking-dot:nth-child(2) {
-            animation-delay: 0.2s;
+            animation-delay: 0.18s;
         }
 
         .agent-thinking-dot:nth-child(3) {
-            animation-delay: 0.4s;
+            animation-delay: 0.36s;
         }
 
-        @keyframes geminiDotPulse {
-            0%, 80%, 100% {
-                opacity: 0.25;
-                transform: scale(0.82);
+        @keyframes geminiWaveBounce {
+            0%, 60%, 100% {
+                transform: translateY(0);
+                opacity: 0.45;
             }
-            40% {
+            30% {
+                transform: translateY(-6px);
                 opacity: 1;
-                transform: scale(1.18);
             }
         }
 
@@ -2916,6 +2998,67 @@
             }
         }
 
+        let currentAgentChatId = null;
+        let openHistoryMenuChatId = null;
+
+        function createNewAgentChatId() {
+            return `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        }
+
+        function resolveMessageChatId(msg, fallbackChatId = 'chat_default') {
+            if (!msg) return fallbackChatId;
+            if (typeof msg.chat_id === 'string' && msg.chat_id.trim()) {
+                return msg.chat_id.trim();
+            }
+            if (Array.isArray(msg.actions_taken)) {
+                for (const item of msg.actions_taken) {
+                    if (item && typeof item._chat_id === 'string' && item._chat_id.trim()) {
+                        return item._chat_id.trim();
+                    }
+                }
+            }
+            return fallbackChatId;
+        }
+
+        function normalizeAgentMessagesWithChatIds(messages) {
+            if (!Array.isArray(messages)) return [];
+            let activeId = 'chat_legacy';
+            return messages.map((msg) => {
+                const explicit = resolveMessageChatId(msg, '');
+                if (explicit) {
+                    activeId = explicit;
+                } else if (msg.role === 'user' && msg.id) {
+                    activeId = `chat_${msg.id}`;
+                }
+                return {
+                    ...msg,
+                    chat_id: activeId,
+                };
+            });
+        }
+
+        function getGroupedChatSessions() {
+            const sessionsMap = new Map();
+            agentMessages.forEach((msg) => {
+                const cid = resolveMessageChatId(msg, 'chat_legacy');
+                if (!sessionsMap.has(cid)) {
+                    sessionsMap.set(cid, {
+                        chatId: cid,
+                        title: '',
+                        firstMsgId: msg.id || null,
+                        messages: [],
+                    });
+                }
+                const group = sessionsMap.get(cid);
+                group.messages.push(msg);
+                if (!group.title && msg.role === 'user' && String(msg.content || '').trim()) {
+                    group.title = String(msg.content || '').replace(/\s+/g, ' ').trim();
+                    group.firstMsgId = msg.id || group.firstMsgId;
+                }
+            });
+            return Array.from(sessionsMap.values()).filter((g) => g.title);
+        }
+
         async function loadAgentState() {
             if (!isAuthenticated) return;
             try {
@@ -2927,8 +3070,14 @@
                 const data = await parseJsonSafe(response);
                 agentPolicy = data.policy || null;
                 agentServices = Array.isArray(data.google_services) ? data.google_services : [];
-                agentMessages = Array.isArray(data.messages) ? data.messages : [];
+                agentMessages = normalizeAgentMessagesWithChatIds(Array.isArray(data.messages) ? data.messages : []);
                 agentRuntimeCode = typeof data.runtime_code === 'string' ? data.runtime_code : '';
+                if (!currentAgentChatId) {
+                    const sessions = getGroupedChatSessions();
+                    currentAgentChatId = sessions.length > 0
+                        ? sessions[sessions.length - 1].chatId
+                        : createNewAgentChatId();
+                }
                 renderAgentState();
             } catch (_) {}
         }
@@ -3029,13 +3178,49 @@
             return box;
         }
 
+        async function deleteAgentChatFromHistory(chatId, firstMsgId) {
+            if (!isAuthenticated || !chatId) return;
+            openHistoryMenuChatId = null;
+            try {
+                const params = new URLSearchParams();
+                params.set('chat_id', String(chatId));
+                if (firstMsgId) {
+                    params.set('message_id', String(firstMsgId));
+                }
+                const response = await fetch(`${apiBase}/agent/history?${params.toString()}`, {
+                    method: 'DELETE',
+                    credentials: 'include',
+                    headers: buildAuthHeaders(),
+                });
+                if (response.ok) {
+                    agentMessages = agentMessages.filter(
+                        (m) => resolveMessageChatId(m, 'chat_legacy') !== chatId
+                    );
+                    if (currentAgentChatId === chatId) {
+                        currentAgentChatId = createNewAgentChatId();
+                    }
+                    renderAgentState();
+                }
+            } catch (_) {}
+        }
+
+        document.addEventListener('click', (evt) => {
+            if (!openHistoryMenuChatId) return;
+            const target = evt.target;
+            if (target && target.closest && target.closest('.sidebar-history-row')) {
+                return;
+            }
+            openHistoryMenuChatId = null;
+            renderSidebarChatHistory();
+        });
+
         function renderSidebarChatHistory() {
             const listEl = document.getElementById('sidebarChatHistoryList');
             if (!listEl) return;
             listEl.replaceChildren();
 
-            const userTurns = agentMessages.filter((m) => m.role === 'user' && (m.content || '').trim());
-            if (!userTurns.length) {
+            const sessions = getGroupedChatSessions();
+            if (!sessions.length) {
                 const emptyEl = document.createElement('div');
                 emptyEl.className = 'sidebar-history-empty';
                 emptyEl.textContent = 'No messages yet';
@@ -3043,22 +3228,51 @@
                 return;
             }
 
-            userTurns.slice().reverse().forEach((turn, idx) => {
+            sessions.slice().reverse().forEach((session) => {
+                const isActive = session.chatId === currentAgentChatId;
+                const isMenuOpen = openHistoryMenuChatId === session.chatId;
+
+                const row = document.createElement('div');
+                row.className = `sidebar-history-row${isActive ? ' active' : ''}`;
+
                 const btn = document.createElement('button');
                 btn.type = 'button';
-                btn.className = `sidebar-history-item${idx === 0 ? ' active' : ''}`;
-                const cleanText = String(turn.content || '').replace(/\s+/g, ' ').trim();
-                btn.textContent = cleanText;
-                btn.title = cleanText;
+                btn.className = 'sidebar-history-item';
+                btn.textContent = session.title;
+                btn.title = session.title;
                 btn.addEventListener('click', () => {
-                    listEl.querySelectorAll('.sidebar-history-item').forEach((el) => el.classList.remove('active'));
-                    btn.classList.add('active');
-                    const targetEl = document.getElementById(`agent-msg-${turn.id}`);
-                    if (targetEl) {
-                        targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
+                    openHistoryMenuChatId = null;
+                    currentAgentChatId = session.chatId;
+                    renderAgentState();
                 });
-                listEl.appendChild(btn);
+
+                const moreBtn = document.createElement('button');
+                moreBtn.type = 'button';
+                moreBtn.className = `sidebar-history-more-btn${isMenuOpen ? ' menu-open' : ''}`;
+                moreBtn.setAttribute('aria-label', 'Chat options');
+                moreBtn.title = 'Chat options';
+                moreBtn.textContent = '⋮';
+                moreBtn.addEventListener('click', (evt) => {
+                    evt.stopPropagation();
+                    openHistoryMenuChatId = openHistoryMenuChatId === session.chatId ? null : session.chatId;
+                    renderSidebarChatHistory();
+                });
+
+                const menu = document.createElement('div');
+                menu.className = `sidebar-history-menu${isMenuOpen ? ' open' : ''}`;
+
+                const delBtn = document.createElement('button');
+                delBtn.type = 'button';
+                delBtn.className = 'sidebar-history-delete-btn';
+                delBtn.textContent = 'Delete chat';
+                delBtn.addEventListener('click', (evt) => {
+                    evt.stopPropagation();
+                    deleteAgentChatFromHistory(session.chatId, session.firstMsgId);
+                });
+
+                menu.appendChild(delBtn);
+                row.append(btn, moreBtn, menu);
+                listEl.appendChild(row);
             });
         }
 
@@ -3128,7 +3342,15 @@
             if (!stream) return;
             stream.replaceChildren();
 
-            const hasAnyMessages = agentMessages.length > 0 || agentSending;
+            if (!currentAgentChatId) {
+                currentAgentChatId = createNewAgentChatId();
+            }
+
+            const visibleMessages = agentMessages.filter(
+                (msg) => resolveMessageChatId(msg, 'chat_legacy') === currentAgentChatId
+            );
+
+            const hasAnyMessages = visibleMessages.length > 0 || agentSending;
             if (stage) {
                 stage.classList.toggle('empty-state', !hasAnyMessages);
                 stage.classList.toggle('has-messages', hasAnyMessages);
@@ -3138,7 +3360,7 @@
                 return;
             }
 
-            agentMessages.forEach((msg) => {
+            visibleMessages.forEach((msg) => {
                 const box = document.createElement('div');
                 const isUser = msg.role === 'user';
                 box.className = `agent-msg ${isUser ? 'user' : 'assistant'}`;
@@ -3232,6 +3454,11 @@
             const message = (input.value || '').trim();
             if (!message) return;
 
+            if (!currentAgentChatId) {
+                currentAgentChatId = createNewAgentChatId();
+            }
+            const activeChatId = currentAgentChatId;
+
             agentSending = true;
             submitBtn.classList.add('thinking');
             submitBtn.title = 'Stop response';
@@ -3239,6 +3466,7 @@
             // Optimistically display the user's message and the thinking indicator immediately
             agentMessages.push({
                 id: Date.now(),
+                chat_id: activeChatId,
                 role: 'user',
                 content: message,
                 actions_taken: [],
@@ -3254,7 +3482,7 @@
                     method: 'POST',
                     credentials: 'include',
                     headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ message }),
+                    body: JSON.stringify({ message, chat_id: activeChatId }),
                     signal: controller.signal,
                 });
                 const data = await parseJsonSafe(response);
@@ -3266,7 +3494,15 @@
 
                 if (data.user_message && data.agent_message) {
                     agentMessages.pop();
-                    agentMessages.push(data.user_message, data.agent_message);
+                    const userMsg = {
+                        ...data.user_message,
+                        chat_id: data.user_message.chat_id || activeChatId,
+                    };
+                    const agentMsg = {
+                        ...data.agent_message,
+                        chat_id: data.agent_message.chat_id || activeChatId,
+                    };
+                    agentMessages.push(userMsg, agentMsg);
                 } else {
                     await loadAgentState();
                 }
@@ -3299,22 +3535,12 @@
             if (agentSending) {
                 stopAgentThinking();
             }
-            const btn = document.getElementById('agentClearHistoryBtn');
-            if (btn) btn.disabled = true;
-            try {
-                const response = await fetch(`${apiBase}/agent/history`, {
-                    method: 'DELETE',
-                    credentials: 'include',
-                    headers: buildAuthHeaders(),
-                });
-                if (response.ok) {
-                    agentMessages = [];
-                    renderAgentState();
-                }
-            } catch (_) {
-            } finally {
-                if (btn) btn.disabled = false;
-            }
+            // Start a fresh conversation view while preserving all previous chats in Chat History
+            openHistoryMenuChatId = null;
+            currentAgentChatId = createNewAgentChatId();
+            renderAgentState();
+            const input = document.getElementById('agentPromptInput');
+            if (input) input.focus();
         }
 
         function switchWorkspaceView(viewName) {

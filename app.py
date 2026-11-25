@@ -565,12 +565,13 @@ class JoshuHandler(BaseHTTPRequestHandler):
                 return
             body = self._read_json_body()
             message = str(body.get("message") or "").strip()
+            chat_id = str(body.get("chat_id") or "").strip() or None
             if not message:
                 self._send_json(400, {"error": "bad_request", "message": "Prompt message cannot be empty."})
                 return
             from preview_server.agent_engine import process_preview_agent_chat
 
-            result = process_preview_agent_chat(session, message)
+            result = process_preview_agent_chat(session, message, chat_id=chat_id)
             self._send_json(200, result)
             return
 
@@ -667,6 +668,7 @@ class JoshuHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
         if parsed.path == "/agent/history":
             token, csrf_failed = self._resolve_auth_token(require_csrf=True)
             if csrf_failed:
@@ -681,6 +683,19 @@ class JoshuHandler(BaseHTTPRequestHandler):
             session = SESSION_MANAGER.get_session(token)
             if session is None:
                 self._send_json(401, {"error": "unauthorized", "message": "Sign in required."})
+                return
+            target_chat_id = (qs.get("chat_id", [""])[0] or "").strip()
+            target_msg_id = (qs.get("message_id", [""])[0] or "").strip()
+            if target_chat_id or target_msg_id:
+                session.agent_messages = [
+                    m
+                    for m in session.agent_messages
+                    if not (
+                        (target_chat_id and str(m.get("chat_id") or "") == target_chat_id)
+                        or (target_msg_id and str(m.get("id") or "") == target_msg_id)
+                    )
+                ]
+                self._send_json(200, {"status": "deleted"})
                 return
             session.agent_messages.clear()
             self._send_json(200, {"status": "cleared"})
