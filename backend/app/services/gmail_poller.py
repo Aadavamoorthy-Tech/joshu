@@ -29,6 +29,7 @@ from app.models.session import Session as UserSession, User, utc_now
 from app.models.task import GoogleOAuthToken, Task
 from app.services.email_analyzer import (
     EmailAnalysisError,
+    analyze_email_smart,
     analyze_email_with_gemini,
     build_instant_analysis,
     is_ai_configured,
@@ -492,7 +493,7 @@ class GmailPollingService:
                 if task_scheduled_for
                 else None
             )
-            instant_analysis = build_instant_analysis(
+            analysis = analyze_email_smart(
                 subject=task_title,
                 sender=str(raw_data.get("organizer") or msg_headers.get("from") or "Unknown Sender"),
                 body=task_description,
@@ -501,12 +502,11 @@ class GmailPollingService:
                 existing_calendar=existing_cal,
                 user_name=user_name,
                 user_email=user_email,
-                needs_deep_ai=ai_enabled,
             )
-            raw_data["ai_analysis"] = instant_analysis
+            raw_data["ai_analysis"] = analysis
             raw_data.pop("ai_analysis_error", None)
-            cal_info = instant_analysis.get("calendar_event") or {}
-            if instant_analysis.get("requires_calendar") and cal_info.get("start_iso"):
+            cal_info = analysis.get("calendar_event") or {}
+            if analysis.get("requires_calendar") and cal_info.get("start_iso"):
                 parsed_start = _parse_iso_naive_utc(cal_info.get("start_iso"))
                 if parsed_start is not None:
                     task_scheduled_for = parsed_start
@@ -591,10 +591,7 @@ class GmailPollingService:
 
         for task in pending_tasks:
             raw = dict(task.raw_data) if isinstance(task.raw_data, dict) else {}
-            existing_ai = raw.get("ai_analysis") if isinstance(raw.get("ai_analysis"), dict) else None
-            needs_deep = bool(existing_ai and existing_ai.get("needs_deep_ai"))
-
-            if existing_ai is not None and not needs_deep:
+            if isinstance(raw.get("ai_analysis"), dict):
                 continue
 
             existing_cal = None

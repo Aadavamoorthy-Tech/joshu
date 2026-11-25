@@ -284,7 +284,6 @@ def list_tasks(
     user_email = (user.email if user and user.email else "")
 
     upgraded_any = False
-    needs_deep_count = 0
     ready_counts = {"pending": 0, "approved": 0, "rejected": 0}
     for t in all_user_tasks:
         t_raw = dict(t.raw_data) if isinstance(t.raw_data, dict) else {}
@@ -309,7 +308,7 @@ def list_tasks(
                 existing_calendar=existing_cal,
                 user_name=user_name,
                 user_email=user_email,
-                needs_deep_ai=True,
+                needs_deep_ai=False,
             )
             t_raw["ai_analysis"] = ai_obj
             t_raw.pop("ai_analysis_error", None)
@@ -319,8 +318,6 @@ def list_tasks(
 
         if t.status == "pending":
             ready_counts["pending"] += 1
-            if isinstance(ai_obj, dict) and ai_obj.get("needs_deep_ai"):
-                needs_deep_count += 1
         elif t.status in ready_counts:
             ready_counts[t.status] += 1
 
@@ -334,7 +331,7 @@ def list_tasks(
     filtered_items = all_matching
 
     sync_running = is_user_sync_running(current_session.user_id)
-    if (trigger_sync or needs_deep_count > 0) and not sync_running:
+    if trigger_sync and not sync_running:
         background_tasks.add_task(_run_background_sync, current_session.user_id)
 
     total = len(filtered_items)
