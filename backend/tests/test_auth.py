@@ -71,11 +71,13 @@ class _FakeFlow:
 
     def authorization_url(self, **kwargs: Any) -> tuple[str, str]:
         state = kwargs["state"]
+        prompt = kwargs.get("prompt", "")
         url = (
             "https://accounts.google.com/o/oauth2/v2/auth"
             f"?client_id=test-client-id.apps.googleusercontent.com"
             f"&redirect_uri={self.redirect_uri}"
             f"&scope=openid+email+profile+https://www.googleapis.com/auth/gmail.readonly"
+            f"&prompt={prompt}"
             f"&state={state}"
         )
         return url, state
@@ -103,6 +105,7 @@ def test_signin_returns_redirect_url_and_stores_state(
 
     with TestClient(app) as client:
         response = client.post("/auth/signin")
+        forced = client.post("/auth/signin", json={"force_consent": True})
 
     assert response.status_code == 200
     body = response.json()
@@ -110,8 +113,12 @@ def test_signin_returns_redirect_url_and_stores_state(
     parsed = urlparse(body["redirect_url"])
     qs = parse_qs(parsed.query)
     assert "state" in qs
+    assert qs["prompt"] == ["select_account"]
     assert "openid" in qs["scope"][0]
     assert "https://www.googleapis.com/auth/gmail.readonly" in auth_routes.OAUTH_SCOPES
+
+    forced_qs = parse_qs(urlparse(forced.json()["redirect_url"]).query)
+    assert forced_qs["prompt"] == ["select_account consent"]
 
     stored = db_session.query(OAuthState).filter_by(state=qs["state"][0]).first()
     assert stored is not None

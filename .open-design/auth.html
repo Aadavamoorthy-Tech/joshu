@@ -922,9 +922,9 @@
             if (listenersBound) return;
             listenersBound = true;
 
-            document.getElementById('signInBtn').addEventListener('click', startSignIn);
-            document.getElementById('authSignInBtn').addEventListener('click', startSignIn);
-            document.getElementById('reconnectGoogleBtn').addEventListener('click', startSignIn);
+            document.getElementById('signInBtn').addEventListener('click', () => startSignIn(false));
+            document.getElementById('authSignInBtn').addEventListener('click', () => startSignIn(false));
+            document.getElementById('reconnectGoogleBtn').addEventListener('click', () => startSignIn(true));
             document.getElementById('logoutBtn').addEventListener('click', logout);
             document.getElementById('syncNowBtn').addEventListener('click', () => syncInboxNow(false));
             document.getElementById('statusBannerClose').addEventListener('click', hideBanner);
@@ -962,7 +962,7 @@
             labelEl.textContent = label;
         }
 
-        async function startSignIn() {
+        async function startSignIn(forceConsent = false) {
             hideBanner();
             const signInButtons = [
                 document.getElementById('signInBtn'),
@@ -977,7 +977,10 @@
                     method: 'POST',
                     credentials: 'include',
                     headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ redirect_uri: redirectUri })
+                    body: JSON.stringify({
+                        redirect_uri: redirectUri,
+                        force_consent: Boolean(forceConsent),
+                    })
                 });
 
                 const data = await parseJsonSafe(response);
