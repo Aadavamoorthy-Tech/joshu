@@ -2285,6 +2285,42 @@
             }
         }
 
+        function getAiCardDescription(task) {
+            const ai = task.ai_analysis || null;
+            const rawSubject = String(task.title || '(No Subject)').replace(/\s+/g, ' ').trim();
+            const rawSender = String(task.organizer || 'Sender').split('<')[0].replace(/["']/g, '').trim() || 'Sender';
+            const rawBodyPrefix = String(task.description || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+
+            if (ai && typeof ai.summary === 'string' && ai.summary.trim()) {
+                const candidate = ai.summary.replace(/\s+/g, ' ').trim();
+                const isRawDump =
+                    candidate.includes('sent a message requiring your response:') ||
+                    (rawBodyPrefix.length >= 20 && candidate.includes(rawBodyPrefix));
+                if (!isRawDump && candidate.toLowerCase() !== rawSubject.toLowerCase()) {
+                    return cleanPreviewText(candidate, 320);
+                }
+            }
+
+            const catMeta = getCategoryMeta(task);
+            if (catMeta.category === 'payment_request') {
+                const pay = (ai && ai.payment) || {};
+                const amt = Number(pay.amount || 0);
+                const cur = pay.currency || 'INR';
+                const amtStr = amt > 0 ? `${amt.toFixed(2)} ${cur}` : cur;
+                return `${rawSender} sent a billing or payment request (${amtStr}) regarding "${rawSubject}" that requires your review and payment approval.`;
+            }
+            if (catMeta.category === 'meeting_rsvp') {
+                return `${rawSender} invited you to a meeting regarding "${rawSubject}" and requested an RSVP confirmation along with calendar scheduling.`;
+            }
+            if (catMeta.category === 'meeting_invite') {
+                return `${rawSender} shared a meeting or calendar invitation for "${rawSubject}" ready to be scheduled on your Google Calendar.`;
+            }
+            if (catMeta.category === 'reply_needed') {
+                return `${rawSender} sent an email regarding "${rawSubject}" asking for your input or confirmation. A reply draft is ready for your review.`;
+            }
+            return `AI Analysis: ${rawSender} sent an informational email regarding "${rawSubject}". No immediate reply, calendar event, or payment is required.`;
+        }
+
         function displayTasks(tasksToShow) {
             const list = document.getElementById('taskList');
             list.replaceChildren();
@@ -2329,9 +2365,14 @@
                 const header = document.createElement('div');
                 header.className = 'task-header';
 
-                const titleEl = document.createElement('div');
-                titleEl.className = 'task-title';
-                titleEl.textContent = task.title || '(No Subject)';
+                const descEl = document.createElement('div');
+                descEl.className = 'task-description';
+                descEl.style.fontSize = '15px';
+                descEl.style.fontWeight = '500';
+                descEl.style.color = 'var(--text-primary)';
+                descEl.style.lineHeight = '1.5';
+                descEl.style.marginBottom = '0';
+                descEl.textContent = getAiCardDescription(task);
 
                 const badgeGroup = document.createElement('div');
                 badgeGroup.className = 'badge-group';
@@ -2345,18 +2386,15 @@
                 statusEl.textContent = status;
 
                 badgeGroup.append(catEl, statusEl);
-                header.append(titleEl, badgeGroup);
+                header.append(descEl, badgeGroup);
 
                 const metaEl = document.createElement('div');
                 metaEl.className = 'task-meta';
+                metaEl.style.marginTop = '8px';
                 const scheduleText = formatSchedule(task.scheduled_for);
-                metaEl.textContent = task.organizer ? `${scheduleText} · ${task.organizer}` : scheduleText;
+                metaEl.textContent = `${scheduleText} · Click card to view full email`;
 
-                const descEl = document.createElement('div');
-                descEl.className = 'task-description';
-                descEl.textContent = cleanPreviewText((ai && ai.summary) || task.snippet || task.description || '', 260);
-
-                item.append(header, metaEl, descEl);
+                item.append(header, metaEl);
 
                 if (status === 'pending' && ai) {
                     const promptBox = document.createElement('div');

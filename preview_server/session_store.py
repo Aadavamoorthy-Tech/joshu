@@ -509,6 +509,7 @@ class SessionManager:
                 "email": 0,
             }
             for task in session.tasks:
+                self._ensure_task_ai_analysis(task, session.display_name, session.email)
                 st = task.get("status")
                 if st in counts:
                     counts[st] += 1
@@ -528,6 +529,81 @@ class SessionManager:
                 "counts": counts,
                 "session": session.to_public_dict(),
             }
+
+    def _ensure_task_ai_analysis(
+        self,
+        task: Dict[str, Any],
+        user_name: str,
+        user_email: str,
+    ) -> None:
+        if isinstance(task.get("ai_analysis"), dict) and task["ai_analysis"].get("summary"):
+            return
+        subject = str(task.get("title") or "(No Subject)").strip()
+        sender = str(task.get("organizer") or "Sender").strip()
+        body = str(task.get("description") or "").strip()
+        is_cal = task.get("source") == "calendar" or bool(task.get("is_meeting_invite"))
+        existing_cal = (
+            {
+                "title": subject,
+                "start_iso": task.get("scheduled_for") or "",
+                "end_iso": "",
+                "location": "",
+                "description": body,
+                "attendees": task.get("attendees") or [],
+            }
+            if is_cal
+            else None
+        )
+        try:
+            import sys
+            from pathlib import Path
+
+            backend_dir = str(Path(__file__).resolve().parent.parent / "backend")
+            if backend_dir not in sys.path:
+                sys.path.insert(0, backend_dir)
+            from app.services.email_analyzer import build_instant_analysis
+
+            ai = build_instant_analysis(
+                subject=subject,
+                sender=sender,
+                body=body,
+                received_at_iso=task.get("scheduled_for"),
+                reply_to=sender,
+                existing_calendar=existing_cal,
+                user_name=user_name,
+                user_email=user_email,
+                needs_deep_ai=False,
+            )
+            task["ai_analysis"] = ai
+            task["action_category"] = ai.get("category") or ("meeting_invite" if is_cal else "informational")
+            task["recommended_action"] = ai.get("recommended_action")
+        except Exception:
+            sender_short = sender.split("<")[0].strip().strip('"') or sender
+            if is_cal:
+                summary = (
+                    f"{sender_short} shared a meeting or calendar invitation for \"{subject}\" "
+                    f"ready to be added to your Google Calendar."
+                )
+                category = "meeting_invite"
+                rec = f"Add '{subject}' to Google Calendar and archive email?"
+            else:
+                summary = (
+                    f"Email from {sender_short} regarding \"{subject}\". "
+                    f"Click this card to inspect the full message content."
+                )
+                category = "informational"
+                rec = f"Mark this email from {sender_short} as read and move to processed folder?"
+            task["ai_analysis"] = {
+                "category": category,
+                "summary": summary,
+                "recommended_action": rec,
+                "requires_reply": False,
+                "requires_payment": False,
+                "requires_calendar": is_cal,
+                "requires_rsvp": False,
+            }
+            task["action_category"] = category
+            task["recommended_action"] = rec
 
     def sync_now(self, token: str) -> Tuple[Optional[MailboxSession], int]:
         """Trigger an immediate real poll for the signed-in mailbox."""

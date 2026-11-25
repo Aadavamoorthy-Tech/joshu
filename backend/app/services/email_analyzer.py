@@ -17,7 +17,7 @@ from app.services.invite_parser import sanitize_event_url
 
 logger = logging.getLogger("joshu.email_analyzer")
 
-DEFAULT_GEMINI_MODEL = "gemini-4-hydrogen"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 _VALID_CATEGORIES = {
     "reply_needed",
@@ -357,6 +357,9 @@ def _sanitize_analysis_payload(
 
 
 _FALLBACK_GEMINI_MODELS = (
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash-lite",
     "gemini-4-hydrogen",
     "gemini-3.1-flash-lite",
     "gemini-4-argon",
@@ -364,9 +367,6 @@ _FALLBACK_GEMINI_MODELS = (
     "gemini-3-flash-preview",
     "gemini-3.1-pro-preview",
     "gemini-3.1-flash-lite-preview",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-2.5-flash-lite",
 )
 
 _NO_REPLY_PATTERNS = (
@@ -625,10 +625,6 @@ def build_instant_analysis(
         and any(cue in lower for cue in reply_cues)
     )
 
-    first_sentence = _clean_single_line(body or clean_subj, 260)
-    if not first_sentence:
-        first_sentence = clean_subj
-
     category = "informational"
     requires_reply = False
     requires_payment = False
@@ -643,7 +639,11 @@ def build_instant_analysis(
         amt_label = (
             f"₹{amount:,.2f}" if (amount and currency == "INR") else (f"{amount:.2f} {currency}" if amount else currency)
         )
-        summary = f"Payment request from {sender_display} for {amt_label} ({clean_subj})."
+        ref_note = f" (Reference: {invoice_ref})" if invoice_ref and invoice_ref != clean_subj else ""
+        summary = (
+            f"{sender_display} sent a billing or payment request for {amt_label}{ref_note} "
+            f"that requires your approval before payment execution."
+        )
         recommended_action = f"Approve automatic payment of {amt_label} to {sender_display}?"
     elif is_meeting:
         requires_calendar = True
@@ -656,11 +656,17 @@ def build_instant_analysis(
                 f"Thank you for the invitation. I confirm my attendance for {clean_subj}.\n\n"
                 f"Best regards,\n{user_display}"
             )
-            summary = f"Meeting invitation from {sender_display} requesting RSVP confirmation: {clean_subj}."
+            summary = (
+                f"{sender_display} invited you to a meeting regarding \"{clean_subj}\" "
+                f"and requested an RSVP confirmation along with calendar scheduling."
+            )
             recommended_action = f"Send RSVP confirmation to {sender_display} and add '{clean_subj}' to Google Calendar?"
         else:
             category = "meeting_invite"
-            summary = f"Meeting scheduled by {sender_display}: {clean_subj}."
+            summary = (
+                f"{sender_display} shared a meeting or calendar invitation for \"{clean_subj}\" "
+                f"ready to be added to your Google Calendar."
+            )
             recommended_action = f"Add '{clean_subj}' to Google Calendar and archive email?"
     elif is_reply_needed:
         category = "reply_needed"
@@ -670,11 +676,36 @@ def build_instant_analysis(
             f"Thank you for your email regarding {clean_subj}. I have reviewed the details and am following up as requested.\n\n"
             f"Best regards,\n{user_display}"
         )
-        summary = f"{sender_display} sent a message requiring your response: {first_sentence}"
+        summary = (
+            f"{sender_display} sent an email regarding \"{clean_subj}\" asking for your input or confirmation. "
+            f"A reply draft has been prepared for your review."
+        )
         recommended_action = f"Send drafted reply to {sender_display}?"
     else:
         category = "informational"
-        summary = f"{sender_display}: {first_sentence}"
+        security_cues = ("security", "sign-in", "login", "password", "verification", "2-step", "two-step", "recovery", "access")
+        receipt_cues = ("receipt", "payment received", "order confirmation", "subscription confirmed", "thank you for your payment")
+        newsletter_cues = ("newsletter", "digest", "weekly", "monthly update", "announcement", "release notes", "what's new")
+        if any(cue in lower for cue in security_cues):
+            summary = (
+                f"{sender_display} sent an automated account or security notification regarding \"{clean_subj}\". "
+                f"No reply or payment action is required."
+            )
+        elif any(cue in lower for cue in receipt_cues):
+            summary = (
+                f"{sender_display} sent a confirmation or receipt regarding \"{clean_subj}\". "
+                f"No payment or reply is required."
+            )
+        elif any(cue in lower for cue in newsletter_cues):
+            summary = (
+                f"{sender_display} shared an informational update or digest about \"{clean_subj}\". "
+                f"No immediate action is required."
+            )
+        else:
+            summary = (
+                f"Informational email from {sender_display} regarding \"{clean_subj}\". "
+                f"No reply, calendar scheduling, or payment action is required."
+            )
         recommended_action = f"Mark this email from {sender_display} as read and move to {processed_folder}?"
 
     cal_data = existing_calendar or {}
@@ -911,4 +942,18 @@ def analyze_email_smart(
         user_email=user_email,
         needs_deep_ai=False,
     )
+
+
+def is_raw_body_summary(summary: Optional[str], body: Optional[str]) -> bool:
+    """Return True if an older cached summary merely copied the raw email body prefix."""
+    if not summary:
+        return True
+    clean_sum = _clean_single_line(summary, 400)
+    if "sent a message requiring your response:" in clean_sum:
+        return True
+    clean_body_prefix = _clean_single_line(body or "", 120)
+    if clean_body_prefix and len(clean_body_prefix) >= 20 and clean_body_prefix in clean_sum:
+        return True
+    return False
+
 

@@ -21,6 +21,7 @@ from app.services.email_analyzer import (
     analyze_email_smart,
     analyze_email_with_gemini,
     build_instant_analysis,
+    is_raw_body_summary,
 )
 from app.services.gmail_poller import (
     GmailApiError,
@@ -288,7 +289,11 @@ def list_tasks(
     for t in all_user_tasks:
         t_raw = dict(t.raw_data) if isinstance(t.raw_data, dict) else {}
         ai_obj = t_raw.get("ai_analysis") if isinstance(t_raw.get("ai_analysis"), dict) else None
-        if t.status == "pending" and ai_obj is None:
+        needs_upgrade = ai_obj is None or is_raw_body_summary(
+            ai_obj.get("summary") if isinstance(ai_obj, dict) else None,
+            t.description,
+        )
+        if needs_upgrade:
             existing_cal = None
             if t.source == "calendar":
                 existing_cal = {
