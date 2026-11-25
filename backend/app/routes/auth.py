@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Google always expands shorthand scopes ("email", "profile") to full URLs in token
 # responses; relax oauthlib's strict string equality check so valid tokens aren't rejected.
-os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -94,21 +94,65 @@ def _is_valid_redirect_uri(redirect_uri: str) -> bool:
 
 
 def _build_google_flow(client_id: str, client_secret: str, redirect_uri: str) -> Flow:
-    """Create a Google OAuth 2.0 Web Application Flow."""
-    flow = Flow.from_client_config(
-        {
-            "web": {
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "auth_uri": "https://accounts.google.com/o/oauth2/v2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [redirect_uri],
-            }
-        },
-        scopes=OAUTH_SCOPES,
-    )
+    """Create a Google OAuth 2.0 confidential Web Application Flow."""
+    client_config = {
+        "web": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/v2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [redirect_uri],
+        }
+    }
+    try:
+        # Confidential Web server apps authenticate with client_secret; disabling
+        # auto-PKCE avoids stateless multi-instance code_verifier mismatches in google-auth-oauthlib >= 1.2.
+        flow = Flow.from_client_config(
+            client_config,
+            scopes=OAUTH_SCOPES,
+            autogenerate_code_verifier=False,
+        )
+    except TypeError:
+        flow = Flow.from_client_config(
+            client_config,
+            scopes=OAUTH_SCOPES,
+        )
     flow.redirect_uri = redirect_uri
     return flow
+
+
+def _classify_token_exchange_error(exc: Exception) -> tuple[str, str]:
+    """Map OAuth token exchange exceptions to safe, actionable diagnostics."""
+    msg = str(exc).lower()
+    if "invalid_client" in msg or "unauthorized_client" in msg or "unauthorized" in msg:
+        return (
+            "invalid_client",
+            "Google rejected the OAuth client credentials (invalid_client). Verify GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in backend/.env.",
+        )
+    if "redirect_uri_mismatch" in msg:
+        return (
+            "redirect_uri_mismatch",
+            "Google rejected the callback URL (redirect_uri_mismatch). Ensure http://localhost:3000/auth.html is listed under Authorized redirect URIs in Google Cloud Console.",
+        )
+    if "scope has changed" in msg:
+        return (
+            "scope_mismatch",
+            "OAuth scope validation mismatch. Restart the backend server so the updated auth route is loaded.",
+        )
+    if "code_verifier" in msg or "code verifier" in msg:
+        return (
+            "pkce_mismatch",
+            "OAuth PKCE verifier mismatch. Restart the backend server and start a fresh sign-in.",
+        )
+    if "invalid_grant" in msg:
+        return (
+            "invalid_code",
+            "Authorization code is invalid, expired, or already used (invalid_grant).",
+        )
+    return (
+        "token_exchange_failed",
+        "Google token exchange failed. Check the backend terminal log for the exact reason.",
+    )
 
 
 def _format_iso_utc(dt) -> str:
@@ -258,11 +302,8 @@ def auth_callback(
         token_response = flow.fetch_token(code=code.strip())
     except Exception as exc:
         logger.error("Failed to exchange OAuth authorization code: %s", exc)
-        raise auth_error(
-            400,
-            "invalid_code",
-            "Authorization code is invalid, expired, or already used",
-        ) from exc
+        err_code, err_msg = _classify_token_exchange_error(exc)
+        raise auth_error(400, err_code, err_msg) from exc
 
     raw_id_token = None
     if isinstance(token_response, dict):
