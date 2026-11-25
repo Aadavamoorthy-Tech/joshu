@@ -186,18 +186,66 @@
             border: 1px solid var(--border-color);
             border-radius: var(--radius-lg);
             padding: var(--spacing-xl);
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-md);
         }
 
         .agent-header-title {
             font-size: 20px;
             font-weight: 600;
             color: var(--text-primary);
-            margin-bottom: 6px;
+            margin-bottom: 4px;
         }
 
         .agent-header-subtitle {
             font-size: 14px;
             color: var(--text-secondary);
+        }
+
+        .agent-prompt-box {
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-sm);
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: var(--spacing-sm);
+            transition: border-color 0.18s ease;
+        }
+
+        .agent-prompt-box:focus-within {
+            border-color: var(--accent-primary);
+        }
+
+        .agent-prompt-input {
+            width: 100%;
+            min-height: 110px;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 14px;
+            line-height: 1.55;
+            resize: vertical;
+            padding: 4px;
+        }
+
+        .agent-prompt-input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .agent-prompt-input:focus {
+            outline: none;
+        }
+
+        .agent-prompt-actions {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: var(--spacing-xs);
+            border-top: 1px solid rgba(53, 61, 79, 0.6);
+            padding-top: var(--spacing-xs);
         }
 
         /* Capability Notice */
@@ -1019,8 +1067,21 @@
             <div id="agentPanel" class="view-panel">
                 <div class="container">
                     <div class="agent-card">
-                        <div class="agent-header-title">Agent</div>
-                        <div class="agent-header-subtitle">Your Joshu Chief of Staff agent workspace.</div>
+                        <div>
+                            <div class="agent-header-title">Agent</div>
+                            <div class="agent-header-subtitle">Enter instructions or a prompt for your Joshu Chief of Staff agent.</div>
+                        </div>
+                        <div class="agent-prompt-box">
+                            <textarea
+                                id="agentPromptInput"
+                                class="agent-prompt-input"
+                                placeholder="Type a prompt for Joshu Agent..."
+                                aria-label="Agent prompt"
+                            ></textarea>
+                            <div class="agent-prompt-actions">
+                                <button type="button" id="agentPromptSubmitBtn" class="btn btn-primary">Send Prompt</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2392,6 +2453,11 @@
             document.querySelectorAll('.sidebar-nav-btn').forEach((btn) => {
                 btn.classList.toggle('active', btn.dataset.view === (isAgent ? 'agent' : 'tasks'));
             });
+
+            if (isAgent) {
+                const promptInput = document.getElementById('agentPromptInput');
+                if (promptInput) promptInput.focus();
+            }
         }
 
         function showMainContent() {
