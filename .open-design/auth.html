@@ -191,9 +191,11 @@
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             border-radius: var(--radius-md);
-            padding: var(--spacing-md);
+            padding: 18px 20px;
             transition: all 0.2s;
             cursor: pointer;
+            overflow: hidden;
+            max-width: 100%;
         }
 
         .task-item:hover {
@@ -206,13 +208,18 @@
             justify-content: space-between;
             align-items: flex-start;
             gap: var(--spacing-sm);
-            margin-bottom: var(--spacing-xs);
+            margin-bottom: 6px;
         }
 
         .task-title {
+            flex: 1;
+            min-width: 0;
             font-weight: 600;
             font-size: 16px;
+            line-height: 1.38;
             color: var(--text-primary);
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
         .badge-group {
@@ -220,6 +227,7 @@
             gap: 6px;
             flex-wrap: wrap;
             flex-shrink: 0;
+            max-width: 100%;
         }
 
         .task-status,
@@ -230,6 +238,7 @@
             text-transform: uppercase;
             font-weight: 600;
             letter-spacing: 0.4px;
+            white-space: nowrap;
         }
 
         .status-pending {
@@ -271,53 +280,105 @@
         .task-meta {
             font-size: 12.5px;
             color: var(--text-secondary);
-            margin-bottom: var(--spacing-sm);
+            margin-bottom: 10px;
+            line-height: 1.45;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
         .task-description {
             color: var(--text-secondary);
             font-size: 13.5px;
-            margin-bottom: var(--spacing-sm);
-            line-height: 1.55;
+            margin-bottom: 12px;
+            line-height: 1.6;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
 
         .ai-prompt-box {
-            background: rgba(74, 158, 255, 0.08);
-            border: 1px solid rgba(74, 158, 255, 0.25);
+            background: rgba(74, 158, 255, 0.07);
+            border: 1px solid rgba(74, 158, 255, 0.24);
+            border-left: 3px solid var(--accent-primary);
             border-radius: var(--radius-sm);
-            padding: 10px 12px;
-            margin-bottom: var(--spacing-sm);
+            padding: 12px 14px;
+            margin-bottom: 12px;
+            overflow: hidden;
+            max-width: 100%;
         }
 
         .ai-prompt-question {
             color: var(--text-primary);
             font-size: 13.5px;
             font-weight: 600;
-            margin-bottom: 4px;
+            line-height: 1.45;
+            margin-bottom: 8px;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
-        .ai-preview-detail {
-            color: var(--text-secondary);
+        .ai-preview-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .ai-preview-row {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
             font-size: 12.5px;
-            white-space: pre-wrap;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            min-width: 0;
+        }
+
+        .ai-preview-label {
+            flex-shrink: 0;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.45px;
+            color: #93c5fd;
+        }
+
+        .ai-preview-value {
+            min-width: 0;
+            flex: 1;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .ai-pending-note {
+            font-size: 12.5px;
+            color: var(--text-secondary);
+            font-style: italic;
+            margin-bottom: 10px;
         }
 
         .execution-receipt {
             background: rgba(52, 168, 83, 0.08);
             border: 1px solid rgba(52, 168, 83, 0.28);
             border-radius: var(--radius-sm);
-            padding: 8px 12px;
-            margin-bottom: var(--spacing-sm);
+            padding: 10px 12px;
+            margin-bottom: 12px;
             font-size: 12.5px;
+            line-height: 1.5;
             color: #a7f3d0;
             display: flex;
             flex-direction: column;
             gap: 4px;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
         .execution-receipt a {
             color: var(--accent-primary);
             text-decoration: underline;
+            overflow-wrap: anywhere;
         }
 
         .task-actions {
@@ -325,7 +386,7 @@
             gap: var(--spacing-xs);
             justify-content: flex-end;
             flex-wrap: wrap;
-            margin-top: var(--spacing-xs);
+            margin-top: 6px;
         }
 
         /* Buttons */
@@ -509,16 +570,44 @@
             border-radius: var(--radius-lg);
             padding: var(--spacing-lg);
             width: 100%;
-            max-width: 660px;
+            max-width: 680px;
             max-height: 88vh;
             overflow-y: auto;
+            overflow-x: hidden;
         }
 
         .modal-header {
-            font-size: 20px;
+            font-size: 19px;
             font-weight: 600;
+            line-height: 1.38;
             margin-bottom: var(--spacing-md);
             color: var(--text-primary);
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .modal-detail-row {
+            margin-bottom: 8px;
+            line-height: 1.55;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .modal-detail-row strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .modal-email-body {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            max-height: 160px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.6;
         }
 
         .modal-section {
@@ -527,6 +616,8 @@
             border-radius: var(--radius-md);
             padding: var(--spacing-md);
             margin-top: var(--spacing-md);
+            overflow: hidden;
+            max-width: 100%;
         }
 
         .modal-section-header {
@@ -551,11 +642,12 @@
             cursor: pointer;
             text-transform: none;
             letter-spacing: 0;
+            line-height: 1.4;
         }
 
         .form-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
             gap: var(--spacing-sm);
         }
 
@@ -564,6 +656,7 @@
             flex-direction: column;
             gap: 4px;
             margin-bottom: var(--spacing-xs);
+            min-width: 0;
         }
 
         .form-field.full {
@@ -580,6 +673,7 @@
         .form-input,
         .form-textarea {
             width: 100%;
+            min-width: 0;
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             border-radius: var(--radius-sm);
@@ -592,7 +686,7 @@
         .form-textarea {
             min-height: 110px;
             resize: vertical;
-            line-height: 1.5;
+            line-height: 1.55;
         }
 
         .form-input:focus,
@@ -603,8 +697,10 @@
 
         .payment-warning {
             font-size: 12px;
+            line-height: 1.45;
             color: #fde68a;
             margin-top: 6px;
+            overflow-wrap: anywhere;
         }
 
         .modal-footer {
@@ -613,6 +709,15 @@
             justify-content: flex-end;
             flex-wrap: wrap;
             margin-top: var(--spacing-lg);
+        }
+
+        @media (max-width: 640px) {
+            .form-grid {
+                grid-template-columns: minmax(0, 1fr);
+            }
+            .task-header {
+                flex-direction: column;
+            }
         }
 
         .modal-status-banner {
@@ -625,6 +730,8 @@
             border: 1px solid var(--border-color);
             background: var(--bg-primary);
             color: var(--text-primary);
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
         .modal-status-banner.visible {
@@ -663,6 +770,8 @@
             justify-content: space-between;
             align-items: center;
             gap: var(--spacing-md);
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
 
         .status-banner.visible {
@@ -788,7 +897,6 @@
             <div id="modalBody"></div>
             <div id="modalStatusBanner" class="modal-status-banner" role="alert"></div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" id="reanalyzeBtnModal" type="button">Analyze with AI</button>
                 <button class="btn btn-secondary" id="closeModalBtn" type="button">Close</button>
                 <button class="btn btn-danger" id="rejectBtnModal" type="button">Reject &amp; Archive</button>
                 <button class="btn btn-success" id="approveBtnModal" type="button">Approve &amp; Execute</button>
@@ -806,6 +914,7 @@
         let currentFilter = 'all';
         let tasks = [];
         let listenersBound = false;
+        let autoRefreshTimer = null;
 
         // Clear any legacy token previously saved in localStorage
         try { localStorage.removeItem('sessionToken'); } catch (_) {}
@@ -927,7 +1036,6 @@
             document.getElementById('syncNowBtn').addEventListener('click', () => syncInboxNow(false));
             document.getElementById('statusBannerClose').addEventListener('click', hideBanner);
             document.getElementById('closeModalBtn').addEventListener('click', closeModal);
-            document.getElementById('reanalyzeBtnModal').addEventListener('click', reanalyzeCurrentTask);
             document.getElementById('approveBtnModal').addEventListener('click', approveCurrentTaskFromModal);
             document.getElementById('rejectBtnModal').addEventListener('click', rejectCurrentTask);
 
@@ -1015,6 +1123,7 @@
                     currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
                     updateHeader();
                     showMainContent();
+                    startAutoRefresh();
                     await fetchCapabilities();
                     await syncInboxNow(true);
                 } else {
@@ -1046,6 +1155,7 @@
                     currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
                     updateHeader();
                     showMainContent();
+                    startAutoRefresh();
                     await fetchCapabilities();
                     await syncInboxNow(true);
                 } else {
@@ -1057,6 +1167,23 @@
                 showAuthContainer();
             } finally {
                 window.oauthProcessing = false;
+            }
+        }
+
+        function startAutoRefresh() {
+            stopAutoRefresh();
+            autoRefreshTimer = window.setInterval(() => {
+                if (!isAuthenticated) return;
+                const modal = document.getElementById('taskModal');
+                if (modal && modal.classList.contains('active')) return;
+                loadTasks(true);
+            }, 45000);
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshTimer !== null) {
+                window.clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
             }
         }
 
@@ -1085,6 +1212,7 @@
                     sessionToken = null;
                     currentUser = null;
                     capabilities = null;
+                    stopAutoRefresh();
                     updateCapabilityBanner();
                     showAuthContainer();
                     return false;
@@ -1096,21 +1224,24 @@
                 updateHeader();
                 showMainContent();
                 updateCapabilityBanner();
+                startAutoRefresh();
                 await loadTasks();
-                if (tasks.length === 0) {
+                const hasUnanalyzedPending = tasks.some((t) => t.status === 'pending' && !t.ai_analysis);
+                if (tasks.length === 0 || (hasUnanalyzedPending && (!capabilities || capabilities.ai_configured !== false))) {
                     await syncInboxNow(true);
                 }
                 return true;
             } catch (_) {
                 isAuthenticated = false;
+                stopAutoRefresh();
                 showAuthContainer();
                 return false;
             }
         }
 
-        async function loadTasks() {
+        async function loadTasks(silent = false) {
             if (!isAuthenticated) return;
-            setSyncState(true, 'Loading...');
+            if (!silent) setSyncState(true, 'Loading...');
             try {
                 const response = await fetch(`${apiBase}/tasks?limit=100`, {
                     credentials: 'include',
@@ -1126,8 +1257,10 @@
                 renderFilteredTasks();
                 setSyncState(false, 'Synced');
             } catch (error) {
-                setSyncState(false, 'Sync error');
-                showBanner('Failed to load tasks: ' + error.message, 'error');
+                if (!silent) {
+                    setSyncState(false, 'Sync error');
+                    showBanner('Failed to load tasks: ' + error.message, 'error');
+                }
             }
         }
 
@@ -1136,7 +1269,7 @@
             if (!silent) hideBanner();
             const btn = document.getElementById('syncNowBtn');
             btn.disabled = true;
-            setSyncState(true, 'Syncing...');
+            setSyncState(true, 'Syncing & analyzing...');
             try {
                 const response = await fetch(`${apiBase}/tasks/sync`, {
                     method: 'POST',
@@ -1157,13 +1290,16 @@
                 }
                 await loadTasks();
                 const created = Number(data.created_tasks || 0);
+                const analyzed = Number(data.analyzed_tasks || 0);
                 const fetched = Number(data.fetched_messages ?? tasks.length);
-                if (!silent || created > 0) {
+                if (!silent || created > 0 || analyzed > 0) {
                     const summary = created > 0
-                        ? `Synced ${created} new item${created === 1 ? '' : 's'} from your inbox.`
-                        : fetched === 0 && tasks.length === 0
-                            ? 'Connected to Gmail, but this mailbox currently has no messages to import.'
-                            : `Inbox is up to date (${tasks.length} item${tasks.length === 1 ? '' : 's'} loaded).`;
+                        ? `Synced and analyzed ${created} new item${created === 1 ? '' : 's'} from your inbox.`
+                        : analyzed > 0
+                            ? `Analyzed ${analyzed} pending email${analyzed === 1 ? '' : 's'} in your inbox.`
+                            : fetched === 0 && tasks.length === 0
+                                ? 'Connected to Gmail, but this mailbox currently has no messages to import.'
+                                : `Inbox is up to date (${tasks.length} item${tasks.length === 1 ? '' : 's'} loaded).`;
                     showBanner(summary, 'info');
                 }
             } catch (error) {
@@ -1172,31 +1308,6 @@
                 await loadTasks();
             } finally {
                 btn.disabled = false;
-            }
-        }
-
-        async function analyzeSingleTask(taskId) {
-            if (!isAuthenticated) return null;
-            setSyncState(true, 'Analyzing...');
-            try {
-                const response = await fetch(`${apiBase}/tasks/${encodeURIComponent(taskId)}/analyze`, {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: buildAuthHeaders(),
-                });
-                const data = await parseJsonSafe(response);
-                if (!response.ok) {
-                    showBanner(data.message || 'AI analysis failed.', 'error');
-                    setSyncState(false, 'Synced');
-                    return null;
-                }
-                await loadTasks();
-                showBanner('Email analyzed and action plan updated.', 'success');
-                return data.task || null;
-            } catch (error) {
-                showBanner('AI analysis failed: ' + error.message, 'error');
-                setSyncState(false, 'Synced');
-                return null;
             }
         }
 
@@ -1284,7 +1395,7 @@
                 if (ai.requires_rsvp) return 'Send RSVP & Add to Calendar';
                 if (ai.requires_payment) {
                     const amt = ai.payment && Number(ai.payment.amount) > 0
-                        ? `${Number(ai.payment.amount).toFixed(2)} ${ai.payment.currency || 'USD'}`
+                        ? `${Number(ai.payment.amount).toFixed(2)} ${ai.payment.currency || 'INR'}`
                         : 'Payment';
                     return `Approve & Pay ${amt}`;
                 }
@@ -1294,6 +1405,12 @@
             }
             if (task.source === 'calendar') return 'Add to Calendar';
             return 'Approve & Archive';
+        }
+
+        function cleanPreviewText(raw, maxLen = 220) {
+            const normalized = String(raw || '').replace(/\s+/g, ' ').trim();
+            if (!normalized) return '';
+            return normalized.length > maxLen ? `${normalized.slice(0, maxLen).trimEnd()}…` : normalized;
         }
 
         function renderExecutionReceipt(container, log) {
@@ -1410,7 +1527,7 @@
 
                 const descEl = document.createElement('div');
                 descEl.className = 'task-description';
-                descEl.textContent = (ai && ai.summary) || task.snippet || task.description || '';
+                descEl.textContent = cleanPreviewText((ai && ai.summary) || task.snippet || task.description || '', 260);
 
                 item.append(header, metaEl, descEl);
 
@@ -1423,27 +1540,50 @@
                     qEl.textContent = ai.recommended_action || task.recommended_action || 'Approve this action?';
                     promptBox.appendChild(qEl);
 
-                    const details = [];
+                    const previewRows = [];
                     if (ai.requires_payment && ai.payment) {
                         const amt = Number(ai.payment.amount || 0).toFixed(2);
-                        details.push(`Payment: ${amt} ${ai.payment.currency || 'USD'} to ${ai.payment.payee_name || 'Vendor'}${ai.payment.invoice_number ? ` (Invoice ${ai.payment.invoice_number})` : ''}`);
+                        const payMeta = `${amt} ${ai.payment.currency || 'INR'} to ${ai.payment.payee_name || 'Vendor'}${ai.payment.invoice_number ? ` · Ref: ${ai.payment.invoice_number}` : ''}`;
+                        previewRows.push({ label: 'Payment', value: payMeta });
                     }
                     if (ai.requires_calendar && ai.calendar_event) {
-                        details.push(`Calendar: ${ai.calendar_event.title || task.title} · ${formatSchedule(ai.calendar_event.start_iso || task.scheduled_for)}`);
+                        previewRows.push({
+                            label: 'Calendar',
+                            value: `${ai.calendar_event.title || task.title} · ${formatSchedule(ai.calendar_event.start_iso || task.scheduled_for)}`,
+                        });
                     }
                     if ((ai.requires_reply || ai.requires_rsvp) && ai.draft_reply && ai.draft_reply.body) {
-                        const preview = ai.draft_reply.body.length > 160
-                            ? `${ai.draft_reply.body.slice(0, 160)}...`
-                            : ai.draft_reply.body;
-                        details.push(`Draft to ${ai.draft_reply.to || task.organizer}: "${preview}"`);
+                        const preview = cleanPreviewText(ai.draft_reply.body, 170);
+                        previewRows.push({
+                            label: 'Draft',
+                            value: `To ${ai.draft_reply.to || task.organizer}: "${preview}"`,
+                        });
                     }
-                    if (details.length) {
-                        const detailEl = document.createElement('div');
-                        detailEl.className = 'ai-preview-detail';
-                        detailEl.textContent = details.join('\n');
-                        promptBox.appendChild(detailEl);
+                    if (previewRows.length) {
+                        const listEl = document.createElement('div');
+                        listEl.className = 'ai-preview-list';
+                        previewRows.forEach((entry) => {
+                            const row = document.createElement('div');
+                            row.className = 'ai-preview-row';
+                            const lbl = document.createElement('span');
+                            lbl.className = 'ai-preview-label';
+                            lbl.textContent = entry.label;
+                            const val = document.createElement('span');
+                            val.className = 'ai-preview-value';
+                            val.textContent = entry.value;
+                            row.append(lbl, val);
+                            listEl.appendChild(row);
+                        });
+                        promptBox.appendChild(listEl);
                     }
                     item.appendChild(promptBox);
+                } else if (status === 'pending' && !ai) {
+                    const note = document.createElement('div');
+                    note.className = 'ai-pending-note';
+                    note.textContent = task.ai_analysis_error
+                        ? `Background analysis notice: ${task.ai_analysis_error}`
+                        : 'Analyzing email automatically in the background…';
+                    item.appendChild(note);
                 }
 
                 renderExecutionReceipt(item, task.execution_log);
@@ -1452,27 +1592,15 @@
                 actionsEl.className = 'task-actions';
 
                 if (status === 'pending') {
-                    if (!ai) {
-                        const analyzeBtn = document.createElement('button');
-                        analyzeBtn.className = 'btn btn-secondary';
-                        analyzeBtn.type = 'button';
-                        analyzeBtn.textContent = 'Analyze with AI';
-                        analyzeBtn.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            analyzeSingleTask(task.id);
-                        });
-                        actionsEl.appendChild(analyzeBtn);
-                    } else {
-                        const reviewBtn = document.createElement('button');
-                        reviewBtn.className = 'btn btn-secondary';
-                        reviewBtn.type = 'button';
-                        reviewBtn.textContent = ai.requires_reply || ai.requires_rsvp ? 'Review / Edit Draft' : 'Review Details';
-                        reviewBtn.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            openTaskModal(task.id);
-                        });
-                        actionsEl.appendChild(reviewBtn);
-                    }
+                    const reviewBtn = document.createElement('button');
+                    reviewBtn.className = 'btn btn-secondary';
+                    reviewBtn.type = 'button';
+                    reviewBtn.textContent = ai && (ai.requires_reply || ai.requires_rsvp) ? 'Review / Edit Draft' : 'Review Details';
+                    reviewBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        openTaskModal(task.id);
+                    });
+                    actionsEl.appendChild(reviewBtn);
 
                     const rejectBtn = document.createElement('button');
                     rejectBtn.className = 'btn btn-danger';
@@ -1574,7 +1702,7 @@
 
         function appendDetailRow(container, label, value) {
             const p = document.createElement('p');
-            p.style.marginBottom = '6px';
+            p.className = 'modal-detail-row';
             const strong = document.createElement('strong');
             strong.textContent = `${label}: `;
             p.appendChild(strong);
@@ -1623,7 +1751,7 @@
             }
             if (task.calendar_event_link && /^https:\/\//i.test(task.calendar_event_link)) {
                 const linkRow = document.createElement('p');
-                linkRow.style.marginBottom = '6px';
+                linkRow.className = 'modal-detail-row';
                 const strong = document.createElement('strong');
                 strong.textContent = 'Calendar / Event Link: ';
                 const anchor = document.createElement('a');
@@ -1645,10 +1773,7 @@
             emailHeader.className = 'modal-section-header';
             emailHeader.textContent = 'Original Email Content';
             const descText = document.createElement('p');
-            descText.style.whiteSpace = 'pre-wrap';
-            descText.style.maxHeight = '140px';
-            descText.style.overflowY = 'auto';
-            descText.style.color = 'var(--text-secondary)';
+            descText.className = 'modal-email-body';
             descText.textContent = task.description || 'No message body.';
             emailSection.append(emailHeader, descText);
             wrapper.appendChild(emailSection);
@@ -1857,18 +1982,15 @@
             const modal = document.getElementById('taskModal');
             const approveBtn = document.getElementById('approveBtnModal');
             const rejectBtn = document.getElementById('rejectBtnModal');
-            const reanalyzeBtn = document.getElementById('reanalyzeBtnModal');
 
             if (isPending) {
                 approveBtn.style.display = 'inline-block';
                 approveBtn.textContent = getPrimaryApproveLabel(task);
                 approveBtn.className = ai && ai.requires_payment ? 'btn btn-warning' : 'btn btn-success';
                 rejectBtn.style.display = 'inline-block';
-                reanalyzeBtn.style.display = 'inline-block';
             } else {
                 approveBtn.style.display = 'none';
                 rejectBtn.style.display = 'none';
-                reanalyzeBtn.style.display = 'none';
             }
 
             hideModalBanner();
@@ -1879,21 +2001,6 @@
             document.getElementById('taskModal').classList.remove('active');
             hideModalBanner();
             currentTaskId = null;
-        }
-
-        async function reanalyzeCurrentTask() {
-            if (!currentTaskId) return;
-            const id = currentTaskId;
-            const btn = document.getElementById('reanalyzeBtnModal');
-            btn.disabled = true;
-            try {
-                const updated = await analyzeSingleTask(id);
-                if (updated) {
-                    openTaskModal(id);
-                }
-            } finally {
-                btn.disabled = false;
-            }
         }
 
         async function approveCurrentTaskFromModal() {
@@ -1968,6 +2075,7 @@
         async function logout() {
             const headers = buildAuthHeaders();
             const wasSignedIn = isAuthenticated || Boolean(sessionToken);
+            stopAutoRefresh();
             sessionToken = null;
             isAuthenticated = false;
             currentUser = null;

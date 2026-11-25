@@ -19,6 +19,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build as build_google_service
 from googleapiclient.errors import HttpError
 from sqlalchemy.orm import Session as DBSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.encryption import decrypt_secret, encrypt_secret
 from app.database import SessionLocal
@@ -39,7 +40,7 @@ from app.services.invite_parser import (
 
 logger = logging.getLogger("joshu.gmail_poller")
 
-DEFAULT_POLL_INTERVAL_MINUTES = 15
+DEFAULT_POLL_INTERVAL_MINUTES = 2
 DEFAULT_MAX_MESSAGES_PER_POLL = 25
 DEFAULT_GMAIL_QUERY = "in:inbox"
 FALLBACK_GMAIL_QUERY = "-in:trash -in:spam"
@@ -72,6 +73,7 @@ class SyncResult:
     skipped_duplicates: int
     ignored_non_invites: int
     synced_at: str
+    analyzed_tasks: int = 0
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -514,12 +516,23 @@ class GmailPollingService:
         token_record.updated_at = synced_at
         db.commit()
 
+        analyzed_existing = 0
+        if ai_enabled:
+            analyzed_existing = self.analyze_unanalyzed_pending_tasks(
+                db=db,
+                user_id=user_id,
+                user_name=user_name,
+                user_email=user_email,
+                limit=self._max_messages,
+            )
+
         logger.info(
-            "Gmail poll finished user_id=%s query=%r fetched=%d created=%d skipped=%d ignored=%d",
+            "Gmail poll finished user_id=%s query=%r fetched=%d created=%d analyzed_existing=%d skipped=%d ignored=%d",
             user_id,
             used_query,
             fetched_count,
             created_count,
+            analyzed_existing,
             skipped_duplicates,
             ignored_non_invites,
         )
@@ -531,20 +544,97 @@ class GmailPollingService:
             skipped_duplicates=skipped_duplicates,
             ignored_non_invites=ignored_non_invites,
             synced_at=synced_at.isoformat() + "Z",
+            analyzed_tasks=analyzed_existing,
         )
 
-    def poll_all_active_users(self, db: DBSession) -> Dict[str, Any]:
-        """Poll Gmail for every user who has an active session and connected Google token."""
-        now = utc_now()
-        active_user_ids = [
-            row[0]
-            for row in db.query(UserSession.user_id)
-            .join(GoogleOAuthToken, GoogleOAuthToken.user_id == UserSession.user_id)
-            .filter(
-                UserSession.is_active.is_(True),
-                UserSession.expires_at > now,
-                GoogleOAuthToken.needs_reconnect.is_(False),
+    def analyze_unanalyzed_pending_tasks(
+        self,
+        *,
+        db: DBSession,
+        user_id: int,
+        user_name: Optional[str] = None,
+        user_email: Optional[str] = None,
+        limit: int = 25,
+    ) -> int:
+        """Automatically analyze any pending tasks for a user that do not yet have AI analysis."""
+        if not is_ai_configured():
+            return 0
+
+        pending_tasks: List[Task] = (
+            db.query(Task)
+            .filter(Task.user_id == user_id, Task.status == "pending")
+            .order_by(Task.created_at.desc())
+            .limit(max(1, limit))
+            .all()
+        )
+        analyzed_count = 0
+        for task in pending_tasks:
+            raw = dict(task.raw_data) if isinstance(task.raw_data, dict) else {}
+            if isinstance(raw.get("ai_analysis"), dict):
+                continue
+
+            existing_cal = None
+            if task.source == "calendar":
+                existing_cal = {
+                    "title": task.title,
+                    "start_iso": (
+                        task.scheduled_for.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+                        if task.scheduled_for
+                        else ""
+                    ),
+                    "end_iso": raw.get("end_time") or "",
+                    "location": raw.get("location") or "",
+                    "description": task.description or "",
+                    "attendees": raw.get("attendees") or [],
+                }
+
+            received_iso = (
+                task.scheduled_for.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+                if task.scheduled_for
+                else None
             )
+            try:
+                analysis = analyze_email_with_gemini(
+                    subject=task.title or "(No Subject)",
+                    sender=str(raw.get("organizer") or "Unknown Sender"),
+                    body=task.description or "",
+                    received_at_iso=received_iso,
+                    reply_to=raw.get("reply_to"),
+                    existing_calendar=existing_cal,
+                    user_name=user_name,
+                    user_email=user_email,
+                )
+                raw["ai_analysis"] = analysis
+                raw.pop("ai_analysis_error", None)
+                cal_info = analysis.get("calendar_event") or {}
+                if analysis.get("requires_calendar") and cal_info.get("start_iso"):
+                    parsed_start = _parse_iso_naive_utc(cal_info.get("start_iso"))
+                    if parsed_start is not None:
+                        task.scheduled_for = parsed_start
+                    if task.source != "calendar":
+                        task.source = "calendar"
+                task.raw_data = raw
+                flag_modified(task, "raw_data")
+                task.updated_at = utc_now()
+                db.commit()
+                analyzed_count += 1
+            except EmailAnalysisError as exc:
+                logger.warning("Background AI analysis failed for task_id=%s: %s", task.id, exc)
+                raw["ai_analysis_error"] = str(exc)
+                task.raw_data = raw
+                flag_modified(task, "raw_data")
+                db.commit()
+                if getattr(exc, "status_code", None) in (400, 403, 404):
+                    break
+
+        return analyzed_count
+
+    def poll_all_active_users(self, db: DBSession) -> Dict[str, Any]:
+        """Poll Gmail and run AI analysis for every connected user in the background, even when logged out."""
+        connected_user_ids = [
+            row[0]
+            for row in db.query(GoogleOAuthToken.user_id)
+            .filter(GoogleOAuthToken.needs_reconnect.is_(False))
             .distinct()
             .all()
         ]
@@ -552,14 +642,16 @@ class GmailPollingService:
         summary: Dict[str, Any] = {
             "polled_users": 0,
             "created_tasks": 0,
+            "analyzed_tasks": 0,
             "errors": 0,
         }
 
-        for uid in active_user_ids:
+        for uid in connected_user_ids:
             try:
                 result = self.poll_user_inbox(db, uid)
                 summary["polled_users"] += 1
                 summary["created_tasks"] += result.created_tasks
+                summary["analyzed_tasks"] += result.analyzed_tasks
             except GmailPollingError as exc:
                 summary["errors"] += 1
                 logger.warning("Gmail poll skipped for user_id=%s: %s", uid, exc)
@@ -603,17 +695,21 @@ class GmailPollingScheduler:
     async def _loop(self) -> None:
         interval_seconds = self._interval_minutes * 60
         logger.info("Gmail polling scheduler started (interval=%dm)", self._interval_minutes)
+        # Run an initial background sync/analysis cycle shortly after startup so emails are ready immediately.
+        first_wait_seconds = 3
         while not self._stop_event.is_set():
             try:
-                await asyncio.wait_for(self._stop_event.wait(), timeout=interval_seconds)
+                await asyncio.wait_for(self._stop_event.wait(), timeout=first_wait_seconds)
                 break
             except asyncio.TimeoutError:
+                first_wait_seconds = interval_seconds
                 try:
                     summary = await asyncio.to_thread(self._run_cycle_sync)
                     logger.info(
-                        "Gmail poll cycle complete: users=%s tasks=%s errors=%s",
+                        "Gmail poll cycle complete: users=%s tasks=%s analyzed=%s errors=%s",
                         summary["polled_users"],
                         summary["created_tasks"],
+                        summary.get("analyzed_tasks", 0),
                         summary["errors"],
                     )
                 except Exception:

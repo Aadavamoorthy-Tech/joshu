@@ -334,6 +334,7 @@ def trigger_gmail_sync(
         "status": "completed",
         "fetched_messages": result.fetched_messages,
         "created_tasks": result.created_tasks,
+        "analyzed_tasks": result.analyzed_tasks,
         "skipped_duplicates": result.skipped_duplicates,
         "ignored_non_invites": result.ignored_non_invites,
         "synced_at": result.synced_at,
