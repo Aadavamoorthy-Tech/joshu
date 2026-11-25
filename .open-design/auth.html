@@ -95,11 +95,109 @@
             font-size: 12px;
         }
 
+        /* Workspace Layout (Left Sidebar + Main Content) */
+        .app-workspace {
+            display: flex;
+            min-height: calc(100vh - 71px);
+            align-items: stretch;
+        }
+
+        .app-sidebar {
+            width: 230px;
+            flex-shrink: 0;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            padding: var(--spacing-md) 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .sidebar-section-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.7px;
+            color: var(--text-secondary);
+            padding: 4px 12px 8px;
+        }
+
+        .sidebar-nav-btn {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            border-radius: var(--radius-md);
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 500;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.18s ease;
+        }
+
+        .sidebar-nav-btn:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .sidebar-nav-btn.active {
+            color: var(--accent-primary);
+            background: rgba(74, 158, 255, 0.12);
+            border-color: rgba(74, 158, 255, 0.28);
+            font-weight: 600;
+        }
+
+        .sidebar-nav-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: currentColor;
+            opacity: 0.75;
+            flex-shrink: 0;
+        }
+
+        .app-main {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .view-panel {
+            display: none;
+        }
+
+        .view-panel.active {
+            display: block;
+        }
+
         /* Main Container */
         .container {
             max-width: 1200px;
             margin: 0 auto;
             padding: var(--spacing-lg);
+        }
+
+        .agent-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-xl);
+        }
+
+        .agent-header-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+
+        .agent-header-subtitle {
+            font-size: 14px;
+            color: var(--text-secondary);
         }
 
         /* Capability Notice */
@@ -711,6 +809,28 @@
             margin-top: var(--spacing-lg);
         }
 
+        @media (max-width: 768px) {
+            .app-workspace {
+                flex-direction: column;
+            }
+            .app-sidebar {
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid var(--border-color);
+                flex-direction: row;
+                align-items: center;
+                padding: 10px var(--spacing-md);
+                overflow-x: auto;
+            }
+            .sidebar-section-label {
+                display: none;
+            }
+            .sidebar-nav-btn {
+                width: auto;
+                white-space: nowrap;
+            }
+        }
+
         @media (max-width: 640px) {
             .form-grid {
                 grid-template-columns: minmax(0, 1fr);
@@ -838,44 +958,73 @@
         <button id="statusBannerClose" class="status-banner-close" type="button" aria-label="Dismiss">×</button>
     </div>
 
-    <!-- Main Content -->
-    <div class="container" id="mainContent" style="display: none;">
-        <!-- Stats -->
-        <div class="stats-bar">
-            <div class="stat-card">
-                <div class="stat-label">Pending</div>
-                <div class="stat-value" id="pendingCount">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Approved</div>
-                <div class="stat-value" id="approvedCount">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Rejected</div>
-                <div class="stat-value" id="rejectedCount">0</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Total</div>
-                <div class="stat-value" id="totalCount">0</div>
-            </div>
-        </div>
+    <!-- Main Workspace (Left Sidebar + View Panels) -->
+    <div class="app-workspace" id="mainContent" style="display: none;">
+        <aside class="app-sidebar" aria-label="Workspace navigation">
+            <div class="sidebar-section-label">Workspace</div>
+            <button type="button" class="sidebar-nav-btn active" id="sidebarTabTasks" data-view="tasks">
+                <span class="sidebar-nav-dot" aria-hidden="true"></span>
+                <span>View Tasks</span>
+            </button>
+            <button type="button" class="sidebar-nav-btn" id="sidebarTabAgent" data-view="agent">
+                <span class="sidebar-nav-dot" aria-hidden="true"></span>
+                <span>Agent</span>
+            </button>
+        </aside>
 
-        <!-- Tabs -->
-        <div class="tabs">
-            <button class="tab-button active" data-tab="all">All Tasks</button>
-            <button class="tab-button" data-tab="pending">Pending</button>
-            <button class="tab-button" data-tab="approved">Approved</button>
-            <button class="tab-button" data-tab="rejected">Rejected</button>
-        </div>
+        <main class="app-main">
+            <!-- View Tasks Tab Panel -->
+            <div id="viewTasksPanel" class="view-panel active">
+                <div class="container">
+                    <!-- Stats -->
+                    <div class="stats-bar">
+                        <div class="stat-card">
+                            <div class="stat-label">Pending</div>
+                            <div class="stat-value" id="pendingCount">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Approved</div>
+                            <div class="stat-value" id="approvedCount">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Rejected</div>
+                            <div class="stat-value" id="rejectedCount">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Total</div>
+                            <div class="stat-value" id="totalCount">0</div>
+                        </div>
+                    </div>
 
-        <!-- Tasks -->
-        <div class="task-list" id="taskList">
-            <div class="empty-state">
-                <div class="empty-state-icon">✓</div>
-                <div class="empty-state-title">No tasks yet</div>
-                <p>Click Sync Inbox to fetch and analyze your messages.</p>
+                    <!-- Tabs -->
+                    <div class="tabs">
+                        <button class="tab-button active" data-tab="all">All Tasks</button>
+                        <button class="tab-button" data-tab="pending">Pending</button>
+                        <button class="tab-button" data-tab="approved">Approved</button>
+                        <button class="tab-button" data-tab="rejected">Rejected</button>
+                    </div>
+
+                    <!-- Tasks -->
+                    <div class="task-list" id="taskList">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">✓</div>
+                            <div class="empty-state-title">No tasks yet</div>
+                            <p>Click Sync Inbox to fetch and analyze your messages.</p>
+                        </div>
+                    </div>
+                </div>
             </div>
-        </div>
+
+            <!-- Agent Tab Panel -->
+            <div id="agentPanel" class="view-panel">
+                <div class="container">
+                    <div class="agent-card">
+                        <div class="agent-header-title">Agent</div>
+                        <div class="agent-header-subtitle">Your Joshu Chief of Staff agent workspace.</div>
+                    </div>
+                </div>
+            </div>
+        </main>
     </div>
 
     <!-- Auth Container -->
@@ -1048,6 +1197,10 @@
 
             document.querySelectorAll('.tab-button').forEach((btn) => {
                 btn.addEventListener('click', () => filterTasks(btn.dataset.tab, btn));
+            });
+
+            document.querySelectorAll('.sidebar-nav-btn').forEach((btn) => {
+                btn.addEventListener('click', () => switchWorkspaceView(btn.dataset.view));
             });
 
             window.addEventListener('message', (event) => {
@@ -2229,9 +2382,21 @@
             document.getElementById('capabilityBar').classList.remove('visible');
         }
 
+        function switchWorkspaceView(viewName) {
+            const isAgent = viewName === 'agent';
+            const tasksPanel = document.getElementById('viewTasksPanel');
+            const agentPanel = document.getElementById('agentPanel');
+            if (tasksPanel) tasksPanel.classList.toggle('active', !isAgent);
+            if (agentPanel) agentPanel.classList.toggle('active', isAgent);
+
+            document.querySelectorAll('.sidebar-nav-btn').forEach((btn) => {
+                btn.classList.toggle('active', btn.dataset.view === (isAgent ? 'agent' : 'tasks'));
+            });
+        }
+
         function showMainContent() {
             document.getElementById('authContainer').style.display = 'none';
-            document.getElementById('mainContent').style.display = 'block';
+            document.getElementById('mainContent').style.display = 'flex';
         }
 
         async function bootstrap() {
