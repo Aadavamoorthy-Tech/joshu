@@ -547,6 +547,19 @@ class GmailPollingService:
             limit=self._max_messages,
         )
 
+        try:
+            from app.services.agent_service import apply_agent_policies_for_user
+
+            auto_actions = apply_agent_policies_for_user(db, user_id)
+            if auto_actions:
+                logger.info(
+                    "Joshu Agent auto-executed %d task(s) for user_id=%s",
+                    len(auto_actions),
+                    user_id,
+                )
+        except Exception as agent_exc:
+            logger.warning("Agent auto-policy evaluation skipped user_id=%s: %s", user_id, agent_exc)
+
         logger.info(
             "Gmail poll finished user_id=%s query=%r fetched=%d created=%d analyzed_existing=%d skipped=%d ignored=%d",
             user_id,

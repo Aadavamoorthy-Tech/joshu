@@ -92,6 +92,7 @@ def ensure_task_approval_columns(target_engine: Engine) -> None:
 
 def init_db() -> None:
     """Ensure all SQLAlchemy models are imported, tables exist, and incremental columns are applied."""
+    from app.models import agent as _agent_models  # noqa: F401
     from app.models import session as _session_models  # noqa: F401
     from app.models import task as _task_models  # noqa: F401
 

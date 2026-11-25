@@ -20,6 +20,7 @@ logging.basicConfig(
 )
 
 from app.database import init_db  # noqa: E402
+from app.routes.agent import router as agent_router  # noqa: E402
 from app.routes.auth import router as auth_router  # noqa: E402
 from app.routes.tasks import router as tasks_router  # noqa: E402
 from app.services.gmail_poller import gmail_polling_scheduler  # noqa: E402
@@ -102,3 +103,4 @@ def health() -> dict[str, str]:
 
 app.include_router(auth_router)
 app.include_router(tasks_router)
+app.include_router(agent_router)

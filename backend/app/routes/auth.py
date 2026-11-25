@@ -62,6 +62,7 @@ class SignInRequest(BaseModel):
 
     redirect_uri: Optional[str] = None
     force_consent: bool = False
+    extra_scopes: Optional[List[str]] = None
 
 
 def _get_oauth_settings() -> tuple[str, str, str, int]:
@@ -110,8 +111,14 @@ def _is_valid_redirect_uri(redirect_uri: str) -> bool:
     return False
 
 
-def _build_google_flow(client_id: str, client_secret: str, redirect_uri: str) -> Flow:
+def _build_google_flow(
+    client_id: str,
+    client_secret: str,
+    redirect_uri: str,
+    scopes: Optional[List[str]] = None,
+) -> Flow:
     """Create a Google OAuth 2.0 confidential Web Application Flow."""
+    effective_scopes = list(scopes) if scopes else list(OAUTH_SCOPES)
     client_config = {
         "web": {
             "client_id": client_id,
@@ -126,13 +133,13 @@ def _build_google_flow(client_id: str, client_secret: str, redirect_uri: str) ->
         # auto-PKCE avoids stateless multi-instance code_verifier mismatches in google-auth-oauthlib >= 1.2.
         flow = Flow.from_client_config(
             client_config,
-            scopes=OAUTH_SCOPES,
+            scopes=effective_scopes,
             autogenerate_code_verifier=False,
         )
     except TypeError:
         flow = Flow.from_client_config(
             client_config,
-            scopes=OAUTH_SCOPES,
+            scopes=effective_scopes,
         )
     flow.redirect_uri = redirect_uri
     return flow
@@ -221,13 +228,29 @@ def auth_signin(
             "Requested redirect URI is not valid (must be localhost or in allowlist)",
         )
 
+    from app.services.agent_service import ALLOWED_EXTRA_GOOGLE_SCOPES
+
+    requested_extra: List[str] = []
+    if payload and payload.extra_scopes:
+        for raw_scope in payload.extra_scopes:
+            cleaned_scope = str(raw_scope or "").strip()
+            if cleaned_scope in ALLOWED_EXTRA_GOOGLE_SCOPES and cleaned_scope not in requested_extra:
+                requested_extra.append(cleaned_scope)
+
+    merged_scopes = list(OAUTH_SCOPES)
+    for sc in requested_extra:
+        if sc not in merged_scopes:
+            merged_scopes.append(sc)
+
     force_consent = bool(payload.force_consent) if payload else False
+    if requested_extra:
+        force_consent = True
     # Only force Google's full consent screen when explicitly reconnecting for missing scopes/refresh token.
     # For normal sign-ins, Google prompts for permissions once on first authorization and skips consent thereafter.
     oauth_prompt = "select_account consent" if force_consent else "select_account"
 
     state = secrets.token_urlsafe(32)
-    flow = _build_google_flow(client_id, client_secret, target_redirect_uri)
+    flow = _build_google_flow(client_id, client_secret, target_redirect_uri, scopes=merged_scopes)
     authorization_url, _ = flow.authorization_url(
         state=state,
         access_type="offline",

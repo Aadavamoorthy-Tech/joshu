@@ -191,16 +191,250 @@
             gap: var(--spacing-md);
         }
 
+        .agent-header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: var(--spacing-md);
+            flex-wrap: wrap;
+        }
+
         .agent-header-title {
             font-size: 20px;
             font-weight: 600;
             color: var(--text-primary);
             margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .agent-status-badge {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: rgba(52, 168, 83, 0.16);
+            color: #86efac;
+            border: 1px solid rgba(52, 168, 83, 0.35);
         }
 
         .agent-header-subtitle {
             font-size: 14px;
             color: var(--text-secondary);
+        }
+
+        .agent-control-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: var(--spacing-md);
+        }
+
+        .agent-control-box {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: var(--spacing-md);
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-xs);
+        }
+
+        .agent-control-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .agent-chip-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .agent-rule-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px;
+            border-radius: var(--radius-sm);
+            font-size: 12.5px;
+            font-weight: 500;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.18s ease;
+        }
+
+        .agent-rule-pill:hover {
+            border-color: var(--accent-primary);
+            color: var(--text-primary);
+        }
+
+        .agent-rule-pill.active {
+            background: rgba(52, 168, 83, 0.14);
+            border-color: rgba(52, 168, 83, 0.45);
+            color: #86efac;
+        }
+
+        .agent-service-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 10px;
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            font-weight: 500;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.18s ease;
+        }
+
+        .agent-service-pill.connected {
+            background: rgba(66, 133, 244, 0.14);
+            border-color: rgba(66, 133, 244, 0.45);
+            color: #93c5fd;
+        }
+
+        .agent-service-pill:hover {
+            border-color: var(--accent-primary);
+            color: var(--text-primary);
+        }
+
+        .agent-code-panel {
+            background: #0b0f17;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: var(--spacing-sm) var(--spacing-md);
+            display: none;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .agent-code-panel.visible {
+            display: flex;
+        }
+
+        .agent-code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-family: monospace;
+        }
+
+        .agent-code-pre {
+            margin: 0;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            color: #a7f3d0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .agent-chat-stream {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: var(--spacing-md);
+            min-height: 300px;
+            max-height: 460px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: var(--spacing-md);
+        }
+
+        .agent-msg {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-width: 88%;
+            padding: 12px 14px;
+            border-radius: var(--radius-md);
+            font-size: 13.5px;
+            line-height: 1.55;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .agent-msg.user {
+            align-self: flex-end;
+            background: rgba(66, 133, 244, 0.18);
+            border: 1px solid rgba(66, 133, 244, 0.4);
+            color: var(--text-primary);
+        }
+
+        .agent-msg.assistant {
+            align-self: flex-start;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .agent-msg-role {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .agent-action-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 4px;
+        }
+
+        .agent-action-badge {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 8px 10px;
+            border-radius: var(--radius-sm);
+            background: rgba(52, 168, 83, 0.1);
+            border: 1px solid rgba(52, 168, 83, 0.3);
+            color: #a7f3d0;
+            font-size: 12.5px;
+        }
+
+        .agent-quick-prompts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .agent-quick-chip {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 5px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.18s ease;
+        }
+
+        .agent-quick-chip:hover {
+            color: var(--text-primary);
+            border-color: var(--accent-primary);
+            background: rgba(66, 133, 244, 0.12);
         }
 
         .agent-prompt-box {
@@ -220,7 +454,7 @@
 
         .agent-prompt-input {
             width: 100%;
-            min-height: 110px;
+            min-height: 90px;
             background: transparent;
             border: none;
             color: var(--text-primary);
@@ -241,11 +475,16 @@
 
         .agent-prompt-actions {
             display: flex;
-            justify-content: flex-end;
+            justify-content: space-between;
             align-items: center;
             gap: var(--spacing-xs);
             border-top: 1px solid rgba(53, 61, 79, 0.6);
             padding-top: var(--spacing-xs);
+        }
+
+        .agent-prompt-hint {
+            font-size: 12px;
+            color: var(--text-secondary);
         }
 
         /* Capability Notice */
@@ -1067,18 +1306,88 @@
             <div id="agentPanel" class="view-panel">
                 <div class="container">
                     <div class="agent-card">
-                        <div>
-                            <div class="agent-header-title">Agent</div>
-                            <div class="agent-header-subtitle">Enter instructions or a prompt for your Joshu Chief of Staff agent.</div>
+                        <div class="agent-header-row">
+                            <div>
+                                <div class="agent-header-title">
+                                    <span>Joshu Autonomous Agent</span>
+                                    <span class="agent-status-badge">Full App Control</span>
+                                </div>
+                                <div class="agent-header-subtitle">
+                                    Configure automatic payments, inbox rules, and Google service integrations, or instruct Joshu to execute tasks directly.
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <button type="button" id="agentToggleCodeBtn" class="btn btn-secondary" style="font-size: 12px; padding: 6px 10px;">
+                                    View Runtime Policy Code
+                                </button>
+                                <button type="button" id="agentClearHistoryBtn" class="btn btn-secondary" style="font-size: 12px; padding: 6px 10px;">
+                                    Clear Chat
+                                </button>
+                            </div>
                         </div>
+
+                        <!-- Autonomous Policies & Connected Google Services -->
+                        <div class="agent-control-grid">
+                            <div class="agent-control-box">
+                                <div class="agent-control-title">
+                                    <span>Active Autonomous Rules</span>
+                                    <span id="agentMemoryCountLabel" style="font-size: 11px; color: var(--text-secondary);"></span>
+                                </div>
+                                <div class="agent-chip-list" id="agentRulesList"></div>
+                            </div>
+                            <div class="agent-control-box">
+                                <div class="agent-control-title">
+                                    <span>Google Services Connected to Joshu</span>
+                                    <span style="font-size: 11px; color: var(--text-secondary);">Click to connect</span>
+                                </div>
+                                <div class="agent-chip-list" id="agentServicesList"></div>
+                            </div>
+                        </div>
+
+                        <!-- Live Runtime Python Code Viewer -->
+                        <div class="agent-code-panel" id="agentCodePanel">
+                            <div class="agent-code-header">
+                                <span>backend/app/services/agent_runtime_rules.py (Live Autonomous Engine)</span>
+                                <span>Auto-generated by Joshu Agent</span>
+                            </div>
+                            <pre class="agent-code-pre" id="agentRuntimeCodePre"></pre>
+                        </div>
+
+                        <!-- Chat Stream -->
+                        <div class="agent-chat-stream" id="agentChatMessages" aria-live="polite"></div>
+
+                        <!-- Quick Prompt Suggestions -->
+                        <div class="agent-quick-prompts" id="agentQuickPrompts">
+                            <button type="button" class="agent-quick-chip" data-prompt="Make all payments under 1000 Rs automatically without asking me">
+                                Auto-pay bills under ₹1,000
+                            </button>
+                            <button type="button" class="agent-quick-chip" data-prompt="Automatically archive informational emails without asking">
+                                Auto-archive informational emails
+                            </button>
+                            <button type="button" class="agent-quick-chip" data-prompt="Automatically add meeting invites to my Google Calendar">
+                                Auto-schedule meeting invites
+                            </button>
+                            <button type="button" class="agent-quick-chip" data-prompt="Connect Google Drive to Joshu">
+                                Connect Google Drive
+                            </button>
+                            <button type="button" class="agent-quick-chip" data-prompt="Connect Google Sheets to Joshu">
+                                Connect Google Sheets
+                            </button>
+                            <button type="button" class="agent-quick-chip" data-prompt="Summarize all my pending tasks and bills">
+                                Summarize pending bills &amp; tasks
+                            </button>
+                        </div>
+
+                        <!-- Prompt Input Box -->
                         <div class="agent-prompt-box">
                             <textarea
                                 id="agentPromptInput"
                                 class="agent-prompt-input"
-                                placeholder="Type a prompt for Joshu Agent..."
+                                placeholder="Tell Joshu Agent what to do (e.g., 'Make all payments under 1000 Rs automatically without asking', 'Connect Google Drive to Joshu', 'Approve task #14', or 'Send an email to...')"
                                 aria-label="Agent prompt"
                             ></textarea>
                             <div class="agent-prompt-actions">
+                                <span class="agent-prompt-hint">Press Enter to send · Shift+Enter for new line</span>
                                 <button type="button" id="agentPromptSubmitBtn" class="btn btn-primary">Send Prompt</button>
                             </div>
                         </div>
@@ -1128,6 +1437,12 @@
         let autoRefreshTimer = null;
         let currentRefreshMs = 30000;
         const processingTasks = new Map();
+
+        let agentPolicy = null;
+        let agentServices = [];
+        let agentMessages = [];
+        let agentRuntimeCode = '';
+        let agentSending = false;
 
         // Clear any legacy token previously saved in localStorage
         try { localStorage.removeItem('sessionToken'); } catch (_) {}
@@ -1264,6 +1579,50 @@
                 btn.addEventListener('click', () => switchWorkspaceView(btn.dataset.view));
             });
 
+            const agentSubmitBtn = document.getElementById('agentPromptSubmitBtn');
+            if (agentSubmitBtn) {
+                agentSubmitBtn.addEventListener('click', () => submitAgentPrompt());
+            }
+
+            const agentInput = document.getElementById('agentPromptInput');
+            if (agentInput) {
+                agentInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        submitAgentPrompt();
+                    }
+                });
+            }
+
+            const toggleCodeBtn = document.getElementById('agentToggleCodeBtn');
+            if (toggleCodeBtn) {
+                toggleCodeBtn.addEventListener('click', () => {
+                    const panel = document.getElementById('agentCodePanel');
+                    if (panel) {
+                        panel.classList.toggle('visible');
+                        toggleCodeBtn.textContent = panel.classList.contains('visible')
+                            ? 'Hide Runtime Policy Code'
+                            : 'View Runtime Policy Code';
+                    }
+                });
+            }
+
+            const clearChatBtn = document.getElementById('agentClearHistoryBtn');
+            if (clearChatBtn) {
+                clearChatBtn.addEventListener('click', clearAgentChatHistory);
+            }
+
+            document.querySelectorAll('.agent-quick-chip').forEach((chip) => {
+                chip.addEventListener('click', () => {
+                    const promptText = chip.dataset.prompt || '';
+                    const input = document.getElementById('agentPromptInput');
+                    if (input && promptText) {
+                        input.value = promptText;
+                        submitAgentPrompt();
+                    }
+                });
+            });
+
             window.addEventListener('message', (event) => {
                 if (event.origin !== window.location.origin) return;
                 const payload = event.data;
@@ -1285,7 +1644,7 @@
             labelEl.textContent = label;
         }
 
-        async function startSignIn(forceConsent = false) {
+        async function startSignIn(forceConsent = false, extraScopes = null) {
             hideBanner();
             const signInButtons = [
                 document.getElementById('authSignInBtn'),
@@ -1295,14 +1654,18 @@
 
             try {
                 const redirectUri = `${window.location.origin}/auth.html`;
+                const reqBody = {
+                    redirect_uri: redirectUri,
+                    force_consent: Boolean(forceConsent),
+                };
+                if (Array.isArray(extraScopes) && extraScopes.length > 0) {
+                    reqBody.extra_scopes = extraScopes;
+                }
                 const response = await fetch(`${apiBase}/auth/signin`, {
                     method: 'POST',
                     credentials: 'include',
                     headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({
-                        redirect_uri: redirectUri,
-                        force_consent: Boolean(forceConsent),
-                    })
+                    body: JSON.stringify(reqBody)
                 });
 
                 const data = await parseJsonSafe(response);
@@ -2443,6 +2806,321 @@
             document.getElementById('capabilityBar').classList.remove('visible');
         }
 
+        async function loadAgentState() {
+            if (!isAuthenticated) return;
+            try {
+                const response = await fetch(`${apiBase}/agent/state`, {
+                    credentials: 'include',
+                    headers: buildAuthHeaders(),
+                });
+                if (!response.ok) return;
+                const data = await parseJsonSafe(response);
+                agentPolicy = data.policy || null;
+                agentServices = Array.isArray(data.google_services) ? data.google_services : [];
+                agentMessages = Array.isArray(data.messages) ? data.messages : [];
+                agentRuntimeCode = typeof data.runtime_code === 'string' ? data.runtime_code : '';
+                renderAgentState();
+            } catch (_) {}
+        }
+
+        function renderAgentState() {
+            const rulesList = document.getElementById('agentRulesList');
+            const servicesList = document.getElementById('agentServicesList');
+            const codePre = document.getElementById('agentRuntimeCodePre');
+            const memLabel = document.getElementById('agentMemoryCountLabel');
+
+            if (codePre) {
+                codePre.textContent = agentRuntimeCode || '# Runtime policy module ready';
+            }
+
+            if (memLabel && agentPolicy) {
+                const notesCount = Array.isArray(agentPolicy.memory_notes) ? agentPolicy.memory_notes.length : 0;
+                memLabel.textContent = notesCount > 0 ? `${notesCount} saved instruction${notesCount === 1 ? '' : 's'}` : 'Click rule to toggle';
+            }
+
+            if (rulesList) {
+                rulesList.replaceChildren();
+                const p = agentPolicy || {};
+                const payEnabled = Boolean(p.auto_pay_enabled && Number(p.auto_pay_max_amount) > 0);
+                const payAmt = Number(p.auto_pay_max_amount || 1000);
+                const payCur = String(p.auto_pay_currency || 'INR');
+
+                const rules = [
+                    {
+                        key: 'auto_pay',
+                        active: payEnabled,
+                        label: payEnabled
+                            ? `✓ Auto-Pay <= ${formatPaymentAmount(payAmt, payCur) || `${payAmt} ${payCur}`}`
+                            : '○ Auto-Pay Bills: Off',
+                        onClick: () => toggleAgentPolicyRule('auto_pay_enabled', !payEnabled, payEnabled ? 0 : (payAmt > 0 ? payAmt : 1000)),
+                    },
+                    {
+                        key: 'auto_archive_informational',
+                        active: Boolean(p.auto_archive_informational),
+                        label: p.auto_archive_informational ? '✓ Auto-Archive Info: On' : '○ Auto-Archive Info: Off',
+                        onClick: () => toggleAgentPolicyRule('auto_archive_informational', !p.auto_archive_informational),
+                    },
+                    {
+                        key: 'auto_add_calendar_invites',
+                        active: Boolean(p.auto_add_calendar_invites),
+                        label: p.auto_add_calendar_invites ? '✓ Auto-Schedule Invites: On' : '○ Auto-Schedule Invites: Off',
+                        onClick: () => toggleAgentPolicyRule('auto_add_calendar_invites', !p.auto_add_calendar_invites),
+                    },
+                    {
+                        key: 'auto_send_replies',
+                        active: Boolean(p.auto_send_replies),
+                        label: p.auto_send_replies ? '✓ Auto-Send Replies: On' : '○ Auto-Send Replies: Off',
+                        onClick: () => toggleAgentPolicyRule('auto_send_replies', !p.auto_send_replies),
+                    },
+                ];
+
+                rules.forEach((rule) => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = `agent-rule-pill${rule.active ? ' active' : ''}`;
+                    btn.textContent = rule.label;
+                    btn.addEventListener('click', rule.onClick);
+                    rulesList.appendChild(btn);
+                });
+            }
+
+            if (servicesList) {
+                servicesList.replaceChildren();
+                agentServices.forEach((svc) => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = `agent-service-pill${svc.connected ? ' connected' : ''}`;
+                    btn.textContent = `${svc.connected ? '✓' : '+'} ${svc.name}`;
+                    btn.title = svc.description || svc.name;
+                    btn.addEventListener('click', () => {
+                        const extraScopes = Array.isArray(svc.scopes) ? svc.scopes : [];
+                        startSignIn(true, extraScopes);
+                    });
+                    servicesList.appendChild(btn);
+                });
+            }
+
+            renderAgentMessages();
+        }
+
+        async function toggleAgentPolicyRule(field, enabled, maxAmountOverride = null) {
+            try {
+                const payload = { [field]: Boolean(enabled) };
+                if (field === 'auto_pay_enabled' && maxAmountOverride !== null) {
+                    payload.auto_pay_max_amount = Number(maxAmountOverride);
+                }
+                const response = await fetch(`${apiBase}/agent/policy`, {
+                    method: 'PATCH',
+                    credentials: 'include',
+                    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify(payload),
+                });
+                const data = await parseJsonSafe(response);
+                if (!response.ok) {
+                    showBanner(extractErrorMessage(data, 'Could not update policy rule.'), 'error');
+                    return;
+                }
+                agentPolicy = data.policy || agentPolicy;
+                if (typeof data.runtime_code === 'string') {
+                    agentRuntimeCode = data.runtime_code;
+                }
+                renderAgentState();
+                await loadTasks(true);
+                const autoExec = Array.isArray(data.auto_executed) ? data.auto_executed.length : 0;
+                showBanner(
+                    autoExec > 0
+                        ? `Agent rule updated and automatically executed ${autoExec} matching task(s).`
+                        : 'Agent autonomous rule and runtime code updated.',
+                    'success'
+                );
+            } catch (error) {
+                showBanner('Failed to update agent rule: ' + error.message, 'error');
+            }
+        }
+
+        function renderAgentMessages() {
+            const stream = document.getElementById('agentChatMessages');
+            if (!stream) return;
+            stream.replaceChildren();
+
+            if (!agentMessages.length) {
+                const welcome = document.createElement('div');
+                welcome.className = 'agent-msg assistant';
+
+                const role = document.createElement('div');
+                role.className = 'agent-msg-role';
+                role.textContent = 'Joshu Agent';
+
+                const body = document.createElement('div');
+                body.textContent =
+                    'Hello! I am your Joshu Agent with full control over this application.\n\n' +
+                    '• Ask me to automate rules (e.g. "Make all payments under 1000 Rs automatically without asking") and I will remember your rule, rewrite the live runtime policy code, and immediately execute matching tasks.\n' +
+                    '• Ask me to connect Google Drive, Google Sheets, Google Docs, Google Contacts, Google Tasks, or Google Meet.\n' +
+                    '• Ask me to approve/reject tasks, send emails, schedule meetings, or sync your inbox.';
+
+                welcome.append(role, body);
+                stream.appendChild(welcome);
+                return;
+            }
+
+            agentMessages.forEach((msg) => {
+                const box = document.createElement('div');
+                const isUser = msg.role === 'user';
+                box.className = `agent-msg ${isUser ? 'user' : 'assistant'}`;
+
+                const role = document.createElement('div');
+                role.className = 'agent-msg-role';
+                role.textContent = isUser ? 'You' : 'Joshu Agent';
+
+                const content = document.createElement('div');
+                content.textContent = msg.content || '';
+
+                box.append(role, content);
+
+                const actions = Array.isArray(msg.actions_taken) ? msg.actions_taken : [];
+                if (actions.length > 0) {
+                    const actionList = document.createElement('div');
+                    actionList.className = 'agent-action-list';
+
+                    actions.forEach((act) => {
+                        const badge = document.createElement('div');
+                        badge.className = 'agent-action-badge';
+
+                        const summaryLine = document.createElement('div');
+                        summaryLine.textContent = `⚡ ${act.summary || act.tool || 'Executed action'}`;
+                        badge.appendChild(summaryLine);
+
+                        if (act.code_updated) {
+                            const viewCodeBtn = document.createElement('button');
+                            viewCodeBtn.type = 'button';
+                            viewCodeBtn.className = 'btn btn-secondary';
+                            viewCodeBtn.style.alignSelf = 'flex-start';
+                            viewCodeBtn.style.fontSize = '11.5px';
+                            viewCodeBtn.style.padding = '4px 8px';
+                            viewCodeBtn.textContent = 'Inspect Updated Runtime Code';
+                            viewCodeBtn.addEventListener('click', () => {
+                                const panel = document.getElementById('agentCodePanel');
+                                const toggleBtn = document.getElementById('agentToggleCodeBtn');
+                                if (panel) {
+                                    panel.classList.add('visible');
+                                    if (toggleBtn) toggleBtn.textContent = 'Hide Runtime Policy Code';
+                                    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                                }
+                            });
+                            badge.appendChild(viewCodeBtn);
+                        }
+
+                        if (act.connect_service && Array.isArray(act.scopes)) {
+                            const connectBtn = document.createElement('button');
+                            connectBtn.type = 'button';
+                            connectBtn.className = 'btn btn-primary';
+                            connectBtn.style.alignSelf = 'flex-start';
+                            connectBtn.style.fontSize = '12px';
+                            connectBtn.style.padding = '5px 10px';
+                            connectBtn.textContent = `Authorize ${act.service_name || 'Google Service'} with Google OAuth`;
+                            connectBtn.addEventListener('click', () => {
+                                startSignIn(true, act.scopes);
+                            });
+                            badge.appendChild(connectBtn);
+                        }
+
+                        actionList.appendChild(badge);
+                    });
+
+                    box.appendChild(actionList);
+                }
+
+                stream.appendChild(box);
+            });
+
+            stream.scrollTop = stream.scrollHeight;
+        }
+
+        async function submitAgentPrompt() {
+            if (agentSending || !isAuthenticated) return;
+            const input = document.getElementById('agentPromptInput');
+            const submitBtn = document.getElementById('agentPromptSubmitBtn');
+            if (!input || !submitBtn) return;
+
+            const message = (input.value || '').trim();
+            if (!message) return;
+
+            agentSending = true;
+            input.disabled = true;
+            submitBtn.disabled = true;
+            const originalLabel = submitBtn.textContent;
+            submitBtn.textContent = 'Running Agent...';
+
+            // Optimistically display the user's message immediately
+            agentMessages.push({
+                id: Date.now(),
+                role: 'user',
+                content: message,
+                actions_taken: [],
+            });
+            input.value = '';
+            renderAgentMessages();
+
+            try {
+                const response = await fetch(`${apiBase}/agent/chat`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ message }),
+                });
+                const data = await parseJsonSafe(response);
+                if (!response.ok) {
+                    showBanner(extractErrorMessage(data, 'Agent request failed.'), 'error');
+                    await loadAgentState();
+                    return;
+                }
+
+                if (data.user_message && data.agent_message) {
+                    agentMessages.pop();
+                    agentMessages.push(data.user_message, data.agent_message);
+                } else {
+                    await loadAgentState();
+                }
+                if (data.policy) agentPolicy = data.policy;
+                if (Array.isArray(data.google_services)) agentServices = data.google_services;
+                if (typeof data.runtime_code === 'string' && data.runtime_code) {
+                    agentRuntimeCode = data.runtime_code;
+                }
+
+                renderAgentState();
+                await loadTasks(true);
+            } catch (error) {
+                showBanner('Agent execution error: ' + error.message, 'error');
+            } finally {
+                agentSending = false;
+                input.disabled = false;
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalLabel;
+                input.focus();
+            }
+        }
+
+        async function clearAgentChatHistory() {
+            if (!isAuthenticated) return;
+            const btn = document.getElementById('agentClearHistoryBtn');
+            if (btn) btn.disabled = true;
+            try {
+                const response = await fetch(`${apiBase}/agent/history`, {
+                    method: 'DELETE',
+                    credentials: 'include',
+                    headers: buildAuthHeaders(),
+                });
+                if (response.ok) {
+                    agentMessages = [];
+                    renderAgentMessages();
+                    showBanner('Agent conversation history cleared. Saved autonomous rules remain active.', 'info');
+                }
+            } catch (_) {
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
         function switchWorkspaceView(viewName) {
             const isAgent = viewName === 'agent';
             const tasksPanel = document.getElementById('viewTasksPanel');
@@ -2455,6 +3133,7 @@
             });
 
             if (isAgent) {
+                loadAgentState();
                 const promptInput = document.getElementById('agentPromptInput');
                 if (promptInput) promptInput.focus();
             }
@@ -2463,6 +3142,7 @@
         function showMainContent() {
             document.getElementById('authContainer').style.display = 'none';
             document.getElementById('mainContent').style.display = 'flex';
+            loadAgentState();
         }
 
         async function bootstrap() {

@@ -324,6 +324,24 @@ def list_tasks(
     if upgraded_any:
         db.commit()
 
+    try:
+        from app.services.agent_service import apply_agent_policies_for_user
+
+        auto_executed = apply_agent_policies_for_user(db, current_session.user_id)
+        if auto_executed:
+            all_matching = (
+                query.order_by(Task.scheduled_for.desc(), Task.created_at.desc()).all()
+            )
+            all_user_tasks = (
+                db.query(Task).filter(Task.user_id == current_session.user_id).all()
+            )
+            ready_counts = {"pending": 0, "approved": 0, "rejected": 0}
+            for t in all_user_tasks:
+                if t.status in ready_counts:
+                    ready_counts[t.status] += 1
+    except Exception as exc:
+        logger.warning("Agent policy check in list_tasks failed: %s", exc)
+
     ready_counts["all"] = (
         ready_counts["pending"] + ready_counts["approved"] + ready_counts["rejected"]
     )
