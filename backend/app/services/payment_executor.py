@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import logging
@@ -266,6 +267,12 @@ class PaymentExecutorService:
 
         narration_raw = re.sub(r"[^A-Za-z0-9 ]+", " ", f"Joshu {invoice_number or payee_name}").strip()
         narration = (narration_raw or "Joshu Payment")[:30]
+        contact_name = re.sub(r"[^A-Za-z0-9 .\-']+", " ", payee_name).strip()[:50]
+        if len(contact_name) < 3:
+            contact_name = "Joshu Vendor"
+
+        # RazorpayX strictly enforces a maximum of 36 characters for X-Payout-Idempotency.
+        rzp_idempotency_key = f"jp-{hashlib.sha256(idempotency_key.encode('utf-8')).hexdigest()[:32]}"
 
         saved_fund_accounts = _load_json_map_env("RAZORPAYX_PAYEE_FUND_ACCOUNTS_JSON")
         saved_fund_account_id = (
@@ -302,7 +309,7 @@ class PaymentExecutorService:
                 "account_type": "vpa",
                 "vpa": {"address": payee_upi_id},
                 "contact": {
-                    "name": payee_name[:50],
+                    "name": contact_name,
                     "email": payee_email or user_email,
                     "type": "vendor",
                     "reference_id": task_id[:40],
@@ -322,12 +329,12 @@ class PaymentExecutorService:
             body["fund_account"] = {
                 "account_type": "bank_account",
                 "bank_account": {
-                    "name": payee_name[:100],
+                    "name": contact_name,
                     "ifsc": payee_ifsc,
                     "account_number": payee_bank_account,
                 },
                 "contact": {
-                    "name": payee_name[:50],
+                    "name": contact_name,
                     "email": payee_email or user_email,
                     "type": "vendor",
                     "reference_id": task_id[:40],
@@ -341,7 +348,7 @@ class PaymentExecutorService:
 
         headers = {
             "Content-Type": "application/json",
-            "X-Payout-Idempotency": idempotency_key,
+            "X-Payout-Idempotency": rzp_idempotency_key,
         }
 
         try:

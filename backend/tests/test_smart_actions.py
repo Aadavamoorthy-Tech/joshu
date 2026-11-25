@@ -166,11 +166,12 @@ class SmartChiefOfStaffUnitTests(unittest.TestCase):
             "PAYMENT_MAX_AUTO_AMOUNT": "50000",
         }
 
-        # 1. UPI payout
+        # 1. UPI payout (with a full 36-char UUID task_id to verify <=36 char RazorpayX idempotency limit)
+        uuid_task_id = "550e8400-e29b-41d4-a716-446655440000"
         with patch.dict(os.environ, rzp_env, clear=False):
             with patch("app.services.payment_executor.requests.post", return_value=fake_rzp_resp) as mock_post:
                 res_upi = executor.execute_payment(
-                    task_id="task-upi-1",
+                    task_id=uuid_task_id,
                     user_email="founder@startup.in",
                     amount=2500.75,
                     currency="INR",
@@ -186,7 +187,9 @@ class SmartChiefOfStaffUnitTests(unittest.TestCase):
         self.assertEqual(res_upi["currency"], "INR")
         upi_kwargs = mock_post.call_args.kwargs
         self.assertEqual(upi_kwargs["auth"], ("rzp_example_id", "rzp_example_secret"))
-        self.assertEqual(upi_kwargs["headers"]["X-Payout-Idempotency"], "joshu-pay-task-upi-1")
+        rzp_idem = upi_kwargs["headers"]["X-Payout-Idempotency"]
+        self.assertTrue(rzp_idem.startswith("jp-"))
+        self.assertLessEqual(len(rzp_idem), 36)
         self.assertEqual(upi_kwargs["json"]["amount"], 250075)
         self.assertEqual(upi_kwargs["json"]["mode"], "UPI")
         self.assertEqual(upi_kwargs["json"]["fund_account"]["account_type"], "vpa")
