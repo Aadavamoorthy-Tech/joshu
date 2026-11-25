@@ -429,6 +429,48 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        /* Inline Status Banner */
+        .status-banner {
+            display: none;
+            max-width: 1200px;
+            margin: var(--spacing-md) auto 0;
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--radius-md);
+            font-size: 13px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            justify-content: space-between;
+            align-items: center;
+            gap: var(--spacing-md);
+        }
+
+        .status-banner.visible {
+            display: flex;
+        }
+
+        .status-banner.error {
+            background: rgba(234, 67, 53, 0.12);
+            border-color: rgba(234, 67, 53, 0.4);
+            color: #f8b4ae;
+        }
+
+        .status-banner.info {
+            background: rgba(74, 158, 255, 0.12);
+            border-color: rgba(74, 158, 255, 0.35);
+            color: #b8d8ff;
+        }
+
+        .status-banner-close {
+            background: none;
+            border: none;
+            color: inherit;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            padding: 2px 6px;
+        }
     </style>
 </head>
 <body>
@@ -436,10 +478,11 @@
     <div class="header">
         <div class="logo">Joshu</div>
         <div class="header-actions">
-            <div id="syncStatus" class="sync-status" style="display: none;">
-                <div class="sync-indicator"></div>
-                <span id="syncLabel">Syncing...</span>
+            <div id="syncStatus" class="sync-status" style="display: none; margin-bottom: 0;">
+                <div class="sync-indicator" id="syncIndicator"></div>
+                <span id="syncLabel">Synced</span>
             </div>
+            <button id="syncNowBtn" class="btn btn-secondary" style="display: none;">Sync Inbox</button>
             <div id="userInfo" class="user-info" style="display: none;">
                 <div class="avatar" id="userAvatar">J</div>
                 <div>
@@ -450,6 +493,11 @@
             <button id="signInBtn" class="btn btn-signin">Sign In with Google</button>
             <button id="logoutBtn" class="btn btn-secondary" style="display: none;">Logout</button>
         </div>
+    </div>
+
+    <div id="statusBanner" class="status-banner" role="alert">
+        <span id="statusBannerText"></span>
+        <button id="statusBannerClose" class="status-banner-close" type="button" aria-label="Dismiss">×</button>
     </div>
 
     <!-- Main Content -->
@@ -510,128 +558,190 @@
             <div class="modal-header" id="modalTitle"></div>
             <div id="modalBody"></div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeModal()">Close</button>
-                <button class="btn btn-danger" id="rejectBtnModal" onclick="rejectCurrentTask()">Reject</button>
-                <button class="btn btn-success" id="approveBtnModal" onclick="approveCurrentTask()">Approve</button>
+                <button class="btn btn-secondary" id="closeModalBtn" type="button">Close</button>
+                <button class="btn btn-danger" id="rejectBtnModal" type="button">Reject</button>
+                <button class="btn btn-success" id="approveBtnModal" type="button">Approve</button>
             </div>
         </div>
     </div>
 
     <script>
-        const API_BASE = 'http://localhost:8000';
-        let sessionToken = localStorage.getItem('sessionToken');
+        let apiBase = window.location.origin;
+        let sessionToken = null;
         let currentUser = null;
         let currentTaskId = null;
+        let currentFilter = 'all';
         let tasks = [];
+        let listenersBound = false;
 
-        // Initialize
-        async function init() {
-            if (sessionToken) {
-                await loadUserProfile();
-                await loadTasks();
-            } else {
-                showAuthContainer();
+        // Clear any legacy token previously saved in localStorage
+        try { localStorage.removeItem('sessionToken'); } catch (_) {}
+
+        async function resolveApiBase() {
+            const host = window.location.hostname;
+            const isLocal = host === 'localhost' || host === '127.0.0.1';
+            if (!isLocal) {
+                apiBase = window.location.origin;
+                return;
             }
-            setupEventListeners();
+            try {
+                const probe = await fetch(`${window.location.origin}/api/config`);
+                if (probe.ok) {
+                    apiBase = window.location.origin;
+                    return;
+                }
+            } catch (_) {}
+            apiBase = 'http://localhost:8000';
+        }
+
+        function showBanner(message, type = 'error') {
+            const banner = document.getElementById('statusBanner');
+            const textEl = document.getElementById('statusBannerText');
+            textEl.textContent = message;
+            banner.className = `status-banner visible ${type}`;
+        }
+
+        function hideBanner() {
+            const banner = document.getElementById('statusBanner');
+            banner.className = 'status-banner';
+            document.getElementById('statusBannerText').textContent = '';
+        }
+
+        async function parseJsonSafe(response) {
+            const raw = await response.text();
+            if (!raw) return {};
+            try {
+                return JSON.parse(raw);
+            } catch (_) {
+                return { message: raw.slice(0, 200) };
+            }
         }
 
         function setupEventListeners() {
+            if (listenersBound) return;
+            listenersBound = true;
+
             document.getElementById('signInBtn').addEventListener('click', startSignIn);
             document.getElementById('authSignInBtn').addEventListener('click', startSignIn);
             document.getElementById('logoutBtn').addEventListener('click', logout);
-            
-            document.querySelectorAll('.tab-button').forEach(btn => {
-                btn.addEventListener('click', (e) => filterTasks(e.target.dataset.tab));
+            document.getElementById('syncNowBtn').addEventListener('click', syncInboxNow);
+            document.getElementById('statusBannerClose').addEventListener('click', hideBanner);
+            document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+            document.getElementById('approveBtnModal').addEventListener('click', approveCurrentTask);
+            document.getElementById('rejectBtnModal').addEventListener('click', rejectCurrentTask);
+
+            document.getElementById('taskModal').addEventListener('click', (e) => {
+                if (e.target === e.currentTarget) closeModal();
+            });
+
+            document.querySelectorAll('.tab-button').forEach((btn) => {
+                btn.addEventListener('click', () => filterTasks(btn.dataset.tab, btn));
+            });
+
+            window.addEventListener('message', (event) => {
+                if (event.origin !== window.location.origin) return;
+                const payload = event.data;
+                if (!payload || payload.type !== 'joshu-google-oauth') return;
+                if (payload.exchange_code) {
+                    redeemExchangeCode(payload.exchange_code);
+                } else if (payload.error) {
+                    showBanner(String(payload.error), 'error');
+                }
             });
         }
 
+        function setSyncState(syncing, label) {
+            const box = document.getElementById('syncStatus');
+            const indicator = document.getElementById('syncIndicator');
+            const labelEl = document.getElementById('syncLabel');
+            box.style.display = 'flex';
+            indicator.classList.toggle('synced', !syncing);
+            labelEl.textContent = label;
+        }
+
         async function startSignIn() {
+            hideBanner();
+            const signInButtons = [
+                document.getElementById('signInBtn'),
+                document.getElementById('authSignInBtn'),
+            ];
+            signInButtons.forEach((b) => { b.disabled = true; });
+
             try {
                 const redirectUri = `${window.location.origin}/auth.html`;
-                console.log('Starting sign-in with redirect_uri:', redirectUri);
-                
-                const response = await fetch(`${API_BASE}/auth/signin`, {
+                const response = await fetch(`${apiBase}/auth/signin`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        redirect_uri: redirectUri
-                    })
+                    body: JSON.stringify({ redirect_uri: redirectUri })
                 });
 
+                const data = await parseJsonSafe(response);
                 if (!response.ok) {
-                    const error = await response.json();
-                    console.error('Sign-in error:', error);
-                    alert('Sign-in failed: ' + (error.message || 'Unknown error'));
+                    showBanner('Sign-in failed: ' + (data.message || `HTTP ${response.status}`), 'error');
                     return;
                 }
 
-                const data = await response.json();
-                console.log('Sign-in response:', data);
-                
-                if (data.redirect_url) {
-                    console.log('Redirecting to:', data.redirect_url);
-                    window.location.href = data.redirect_url;
+                const targetUrl = data.redirect_url || data.auth_url;
+                if (targetUrl && targetUrl.startsWith('https://')) {
+                    window.location.href = targetUrl;
                 } else {
-                    alert('No redirect URL received from server');
+                    showBanner('No valid redirect URL received from server.', 'error');
                 }
             } catch (error) {
-                console.error('Sign-in failed:', error);
-                alert('Failed to start sign-in process: ' + error.message);
+                showBanner('Failed to start sign-in process: ' + error.message, 'error');
+            } finally {
+                signInButtons.forEach((b) => { b.disabled = false; });
             }
         }
 
-        async function handleOAuthCallback() {
-            const params = new URLSearchParams(window.location.search);
-            const code = params.get('code');
-            const state = params.get('state');
-
-            console.log('OAuth callback params:', { code: code ? code.substring(0, 20) + '...' : 'missing', state: state ? state.substring(0, 20) + '...' : 'missing' });
-
-            if (!code || !state) {
-                console.log('No OAuth params in URL, checking for existing session...');
-                return;
-            }
-
-            // Prevent duplicate processing
-            if (window.oauthProcessing) {
-                console.log('OAuth callback already processing, skipping...');
-                return;
-            }
-            window.oauthProcessing = true;
-
+        async function redeemExchangeCode(exchangeCode) {
+            hideBanner();
             try {
-                const callbackUrl = `${API_BASE}/auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
-                console.log('Calling backend callback endpoint...');
-                
-                const response = await fetch(callbackUrl);
-                const data = await response.json();
-                
-                console.log('Backend response status:', response.status);
-                console.log('Backend response:', data);
-                
-                // Clear URL immediately after getting response
-                window.history.replaceState({}, document.title, '/auth.html');
-                
+                const response = await fetch(`${apiBase}/api/auth/google/exchange`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ exchange_code: exchangeCode })
+                });
+                const data = await parseJsonSafe(response);
                 if (response.ok && data.session_token) {
                     sessionToken = data.session_token;
-                    localStorage.setItem('sessionToken', sessionToken);
-                    currentUser = data.user;
-                    console.log('✅ OAuth successful!');
-                    await loadUserProfile();
+                    currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
+                    updateHeader();
+                    showMainContent();
                     await loadTasks();
-                } else if (data.error) {
-                    console.error('❌ Backend error:', data.message);
-                    alert('Authentication failed: ' + data.message);
-                    init();  // Fall back to sign-in screen
                 } else {
-                    console.error('❌ Unexpected response:', data);
-                    alert('Authentication failed: Unexpected response from server');
-                    init();
+                    showBanner('Authentication failed: ' + (data.message || 'Invalid sign-in code.'), 'error');
+                    showAuthContainer();
                 }
             } catch (error) {
-                console.error('❌ OAuth callback failed:', error);
-                alert('Authentication failed: ' + error.message);
-                init();  // Fall back to sign-in screen
+                showBanner('Authentication failed: ' + error.message, 'error');
+                showAuthContainer();
+            }
+        }
+
+        async function handleOAuthCallback(code, state) {
+            if (window.oauthProcessing) return;
+            window.oauthProcessing = true;
+            hideBanner();
+
+            try {
+                const callbackUrl = `${apiBase}/auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+                const response = await fetch(callbackUrl);
+                const data = await parseJsonSafe(response);
+
+                if (response.ok && data.session_token) {
+                    sessionToken = data.session_token;
+                    currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
+                    updateHeader();
+                    showMainContent();
+                    await loadTasks();
+                } else {
+                    showBanner('Authentication failed: ' + (data.message || 'Unexpected response from server.'), 'error');
+                    showAuthContainer();
+                }
+            } catch (error) {
+                showBanner('Authentication failed: ' + error.message, 'error');
+                showAuthContainer();
             } finally {
                 window.oauthProcessing = false;
             }
@@ -639,144 +749,325 @@
 
         async function loadUserProfile() {
             try {
-                const response = await fetch(`${API_BASE}/auth/me`, {
+                const response = await fetch(`${apiBase}/auth/me`, {
                     headers: { 'Authorization': `Bearer ${sessionToken}` }
                 });
-                const data = await response.json();
-                currentUser = data.user;
+                if (!response.ok) {
+                    logout();
+                    return;
+                }
+                const data = await parseJsonSafe(response);
+                currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
                 updateHeader();
                 showMainContent();
             } catch (error) {
-                console.error('Failed to load profile:', error);
+                showBanner('Failed to load profile: ' + error.message, 'error');
                 logout();
             }
         }
 
         async function loadTasks() {
+            if (!sessionToken) return;
+            setSyncState(true, 'Loading...');
             try {
-                const response = await fetch(`${API_BASE}/tasks?limit=100`, {
+                const response = await fetch(`${apiBase}/tasks?limit=100`, {
                     headers: { 'Authorization': `Bearer ${sessionToken}` }
                 });
-                const data = await response.json();
-                tasks = data.tasks;
-                updateStats(data.counts);
-                displayTasks(tasks);
+                if (response.status === 401) {
+                    logout();
+                    return;
+                }
+                const data = await parseJsonSafe(response);
+                tasks = Array.isArray(data.tasks) ? data.tasks : [];
+                updateStats(data.counts || computeCounts(tasks));
+                renderFilteredTasks();
+                setSyncState(false, 'Synced');
             } catch (error) {
-                console.error('Failed to load tasks:', error);
+                setSyncState(false, 'Sync error');
+                showBanner('Failed to load tasks: ' + error.message, 'error');
             }
+        }
+
+        async function syncInboxNow() {
+            if (!sessionToken) return;
+            hideBanner();
+            const btn = document.getElementById('syncNowBtn');
+            btn.disabled = true;
+            setSyncState(true, 'Syncing...');
+            try {
+                const response = await fetch(`${apiBase}/tasks/sync`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                });
+                const data = await parseJsonSafe(response);
+                if (response.status === 401) {
+                    showBanner(data.message || 'Session expired. Please sign in again.', 'error');
+                    logout();
+                    return;
+                }
+                if (!response.ok) {
+                    showBanner(data.message || 'Could not sync inbox right now.', 'error');
+                    setSyncState(false, 'Sync error');
+                    return;
+                }
+                await loadTasks();
+                const created = Number(data.created_tasks || 0);
+                showBanner(created > 0 ? `Synced ${created} new item${created === 1 ? '' : 's'} from your inbox.` : 'Inbox is up to date.', 'info');
+            } catch (error) {
+                setSyncState(false, 'Sync error');
+                showBanner('Inbox sync failed: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        function computeCounts(list) {
+            return {
+                all: list.length,
+                pending: list.filter((t) => t.status === 'pending').length,
+                approved: list.filter((t) => t.status === 'approved').length,
+                rejected: list.filter((t) => t.status === 'rejected').length,
+            };
         }
 
         function updateHeader() {
             if (currentUser) {
+                const displayName = String(currentUser.name || currentUser.email || 'User');
+                const email = String(currentUser.email || '');
                 document.getElementById('userInfo').style.display = 'flex';
+                document.getElementById('syncNowBtn').style.display = 'inline-block';
                 document.getElementById('signInBtn').style.display = 'none';
-                document.getElementById('logoutBtn').style.display = 'block';
-                document.getElementById('userName').textContent = currentUser.name;
-                document.getElementById('userEmail').textContent = currentUser.email;
-                const initials = currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase();
+                document.getElementById('logoutBtn').style.display = 'inline-block';
+                document.getElementById('userName').textContent = displayName;
+                document.getElementById('userEmail').textContent = email;
+                const initials = displayName
+                    .split(/\s+/)
+                    .filter(Boolean)
+                    .slice(0, 2)
+                    .map((n) => n[0])
+                    .join('')
+                    .toUpperCase() || 'J';
                 document.getElementById('userAvatar').textContent = initials;
             }
         }
 
         function updateStats(counts) {
-            document.getElementById('pendingCount').textContent = counts.pending;
-            document.getElementById('approvedCount').textContent = counts.approved;
-            document.getElementById('rejectedCount').textContent = counts.rejected;
-            document.getElementById('totalCount').textContent = counts.all;
+            document.getElementById('pendingCount').textContent = String(counts.pending ?? 0);
+            document.getElementById('approvedCount').textContent = String(counts.approved ?? 0);
+            document.getElementById('rejectedCount').textContent = String(counts.rejected ?? 0);
+            document.getElementById('totalCount').textContent = String(counts.all ?? 0);
+        }
+
+        function formatSchedule(iso) {
+            if (!iso) return 'No scheduled time';
+            const dt = new Date(iso);
+            if (Number.isNaN(dt.getTime())) return 'No scheduled time';
+            return `${dt.toLocaleDateString()} at ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        }
+
+        function normalizeStatus(status) {
+            return ['pending', 'approved', 'rejected'].includes(status) ? status : 'pending';
+        }
+
+        function renderFilteredTasks() {
+            if (currentFilter === 'all') {
+                displayTasks(tasks);
+            } else {
+                displayTasks(tasks.filter((t) => t.status === currentFilter));
+            }
         }
 
         function displayTasks(tasksToShow) {
             const list = document.getElementById('taskList');
-            
-            if (tasksToShow.length === 0) {
-                list.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-state-icon">✓</div>
-                        <div class="empty-state-title">All caught up!</div>
-                        <p>No tasks to show. Check back later.</p>
-                    </div>
-                `;
+            list.replaceChildren();
+
+            if (!tasksToShow.length) {
+                const empty = document.createElement('div');
+                empty.className = 'empty-state';
+
+                const icon = document.createElement('div');
+                icon.className = 'empty-state-icon';
+                icon.textContent = '✓';
+
+                const title = document.createElement('div');
+                title.className = 'empty-state-title';
+                title.textContent = 'All caught up!';
+
+                const desc = document.createElement('p');
+                desc.textContent = 'No tasks to show for this filter. Click Sync Inbox to check for new messages.';
+
+                empty.append(icon, title, desc);
+                list.appendChild(empty);
                 return;
             }
 
-            list.innerHTML = tasksToShow.map(task => `
-                <div class="task-item" onclick="openTaskModal('${task.id}')">
-                    <div class="task-header">
-                        <div class="task-title">${escapeHtml(task.title)}</div>
-                        <div class="task-status status-${task.status}">${task.status}</div>
-                    </div>
-                    <div class="task-meta">
-                        ${new Date(task.scheduled_for).toLocaleDateString()} at ${new Date(task.scheduled_for).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                    </div>
-                    <div class="task-description">${escapeHtml(task.description)}</div>
-                    <div class="task-actions">
-                        ${task.status === 'pending' ? `
-                            <button class="btn btn-danger" onclick="event.stopPropagation(); rejectTask('${task.id}')">Reject</button>
-                            <button class="btn btn-success" onclick="event.stopPropagation(); approveTask('${task.id}')">Approve</button>
-                        ` : ''}
-                    </div>
-                </div>
-            `).join('');
+            tasksToShow.forEach((task) => {
+                const status = normalizeStatus(task.status);
+                const item = document.createElement('div');
+                item.className = 'task-item';
+                item.addEventListener('click', () => openTaskModal(task.id));
+
+                const header = document.createElement('div');
+                header.className = 'task-header';
+
+                const titleEl = document.createElement('div');
+                titleEl.className = 'task-title';
+                titleEl.textContent = task.title || '(No Subject)';
+
+                const statusEl = document.createElement('div');
+                statusEl.className = `task-status status-${status}`;
+                statusEl.textContent = status;
+
+                header.append(titleEl, statusEl);
+
+                const metaEl = document.createElement('div');
+                metaEl.className = 'task-meta';
+                const scheduleText = formatSchedule(task.scheduled_for);
+                metaEl.textContent = task.organizer ? `${scheduleText} · ${task.organizer}` : scheduleText;
+
+                const descEl = document.createElement('div');
+                descEl.className = 'task-description';
+                descEl.textContent = task.snippet || task.description || '';
+
+                const actionsEl = document.createElement('div');
+                actionsEl.className = 'task-actions';
+
+                if (status === 'pending') {
+                    const rejectBtn = document.createElement('button');
+                    rejectBtn.className = 'btn btn-danger';
+                    rejectBtn.type = 'button';
+                    rejectBtn.textContent = 'Reject';
+                    rejectBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        rejectTask(task.id);
+                    });
+
+                    const approveBtn = document.createElement('button');
+                    approveBtn.className = 'btn btn-success';
+                    approveBtn.type = 'button';
+                    approveBtn.textContent = 'Approve';
+                    approveBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        approveTask(task.id);
+                    });
+
+                    actionsEl.append(rejectBtn, approveBtn);
+                }
+
+                item.append(header, metaEl, descEl, actionsEl);
+                list.appendChild(item);
+            });
         }
 
-        function filterTasks(filter) {
-            document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
-            event.target.classList.add('active');
-
-            if (filter === 'all') {
-                displayTasks(tasks);
-            } else {
-                displayTasks(tasks.filter(t => t.status === filter));
+        function filterTasks(filter, clickedBtn) {
+            currentFilter = filter || 'all';
+            document.querySelectorAll('.tab-button').forEach((btn) => btn.classList.remove('active'));
+            if (clickedBtn) {
+                clickedBtn.classList.add('active');
             }
+            renderFilteredTasks();
         }
 
         async function approveTask(taskId) {
             try {
-                await fetch(`${API_BASE}/tasks/${taskId}/approve`, {
+                const response = await fetch(`${apiBase}/tasks/${encodeURIComponent(taskId)}/approve`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${sessionToken}` }
                 });
+                if (!response.ok) {
+                    const data = await parseJsonSafe(response);
+                    showBanner(data.message || 'Failed to approve task.', 'error');
+                    return;
+                }
                 await loadTasks();
             } catch (error) {
-                console.error('Failed to approve task:', error);
+                showBanner('Failed to approve task: ' + error.message, 'error');
             }
         }
 
         async function rejectTask(taskId) {
             try {
-                await fetch(`${API_BASE}/tasks/${taskId}/reject`, {
+                const response = await fetch(`${apiBase}/tasks/${encodeURIComponent(taskId)}/reject`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${sessionToken}` }
                 });
+                if (!response.ok) {
+                    const data = await parseJsonSafe(response);
+                    showBanner(data.message || 'Failed to reject task.', 'error');
+                    return;
+                }
                 await loadTasks();
             } catch (error) {
-                console.error('Failed to reject task:', error);
+                showBanner('Failed to reject task: ' + error.message, 'error');
             }
         }
 
+        function appendDetailRow(container, label, value) {
+            const p = document.createElement('p');
+            p.style.marginBottom = '6px';
+            const strong = document.createElement('strong');
+            strong.textContent = `${label}: `;
+            p.appendChild(strong);
+            p.appendChild(document.createTextNode(value));
+            container.appendChild(p);
+        }
+
         function openTaskModal(taskId) {
-            const task = tasks.find(t => t.id === taskId);
+            const task = tasks.find((t) => t.id === taskId);
             if (!task) return;
 
             currentTaskId = taskId;
-            document.getElementById('modalTitle').textContent = task.title;
-            document.getElementById('modalBody').innerHTML = `
-                <div style="color: var(--text-secondary); font-size: 14px;">
-                    <p><strong>Status:</strong> ${task.status}</p>
-                    <p><strong>Scheduled:</strong> ${new Date(task.scheduled_for).toLocaleString()}</p>
-                    <p><strong>Source:</strong> ${task.source}</p>
-                    <p style="margin-top: var(--spacing-md);"><strong>Description:</strong></p>
-                    <p>${escapeHtml(task.description)}</p>
-                </div>
-            `;
+            document.getElementById('modalTitle').textContent = task.title || '(No Subject)';
+
+            const body = document.getElementById('modalBody');
+            body.replaceChildren();
+
+            const wrapper = document.createElement('div');
+            wrapper.style.color = 'var(--text-secondary)';
+            wrapper.style.fontSize = '14px';
+
+            appendDetailRow(wrapper, 'Status', normalizeStatus(task.status));
+            appendDetailRow(wrapper, 'Scheduled', formatSchedule(task.scheduled_for));
+            appendDetailRow(wrapper, 'Source', String(task.source || 'email'));
+            if (task.organizer) {
+                appendDetailRow(wrapper, 'From', String(task.organizer));
+            }
+            if (task.calendar_event_link && /^https:\/\//i.test(task.calendar_event_link)) {
+                const linkRow = document.createElement('p');
+                linkRow.style.marginBottom = '6px';
+                const strong = document.createElement('strong');
+                strong.textContent = 'Link: ';
+                const anchor = document.createElement('a');
+                anchor.href = task.calendar_event_link;
+                anchor.target = '_blank';
+                anchor.rel = 'noopener noreferrer';
+                anchor.style.color = 'var(--accent-primary)';
+                anchor.textContent = task.calendar_event_link;
+                linkRow.append(strong, anchor);
+                wrapper.appendChild(linkRow);
+            }
+
+            const descLabel = document.createElement('p');
+            descLabel.style.marginTop = 'var(--spacing-md)';
+            const strongDesc = document.createElement('strong');
+            strongDesc.textContent = 'Description:';
+            descLabel.appendChild(strongDesc);
+
+            const descText = document.createElement('p');
+            descText.style.whiteSpace = 'pre-wrap';
+            descText.style.marginTop = '4px';
+            descText.textContent = task.description || 'No message body.';
+
+            wrapper.append(descLabel, descText);
+            body.appendChild(wrapper);
 
             const modal = document.getElementById('taskModal');
             const approveBtn = document.getElementById('approveBtnModal');
             const rejectBtn = document.getElementById('rejectBtnModal');
 
             if (task.status === 'pending') {
-                approveBtn.style.display = 'block';
-                rejectBtn.style.display = 'block';
+                approveBtn.style.display = 'inline-block';
+                rejectBtn.style.display = 'inline-block';
             } else {
                 approveBtn.style.display = 'none';
                 rejectBtn.style.display = 'none';
@@ -792,30 +1083,35 @@
 
         function approveCurrentTask() {
             if (currentTaskId) {
-                approveTask(currentTaskId);
+                const id = currentTaskId;
                 closeModal();
+                approveTask(id);
             }
         }
 
         function rejectCurrentTask() {
             if (currentTaskId) {
-                rejectTask(currentTaskId);
+                const id = currentTaskId;
                 closeModal();
+                rejectTask(id);
             }
         }
 
         async function logout() {
-            try {
-                await fetch(`${API_BASE}/auth/logout`, {
-                    method: 'POST',
-                    headers: { 'Authorization': `Bearer ${sessionToken}` }
-                });
-            } catch (error) {
-                console.error('Logout error:', error);
-            }
-            localStorage.removeItem('sessionToken');
+            const activeToken = sessionToken;
             sessionToken = null;
             currentUser = null;
+            tasks = [];
+            try { localStorage.removeItem('sessionToken'); } catch (_) {}
+
+            if (activeToken) {
+                try {
+                    await fetch(`${apiBase}/auth/logout`, {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${activeToken}` }
+                    });
+                } catch (_) {}
+            }
             showAuthContainer();
         }
 
@@ -823,7 +1119,9 @@
             document.getElementById('authContainer').style.display = 'flex';
             document.getElementById('mainContent').style.display = 'none';
             document.getElementById('userInfo').style.display = 'none';
-            document.getElementById('signInBtn').style.display = 'block';
+            document.getElementById('syncStatus').style.display = 'none';
+            document.getElementById('syncNowBtn').style.display = 'none';
+            document.getElementById('signInBtn').style.display = 'inline-block';
             document.getElementById('logoutBtn').style.display = 'none';
         }
 
@@ -832,27 +1130,49 @@
             document.getElementById('mainContent').style.display = 'block';
         }
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+        async function bootstrap() {
+            setupEventListeners();
+            await resolveApiBase();
+
+            const hash = window.location.hash || '';
+            const hashMatch = hash.match(/oauth_code=([^&]+)/);
+            const hashExchangeCode = hashMatch && hashMatch[1] ? decodeURIComponent(hashMatch[1]) : null;
+
+            const params = new URLSearchParams(window.location.search);
+            const exchangeCode = hashExchangeCode || params.get('exchange_code');
+            const code = params.get('code');
+            const state = params.get('state');
+            const oauthError = params.get('oauth_error') || params.get('error');
+
+            if (window.location.search || hashExchangeCode) {
+                window.history.replaceState({}, document.title, window.location.pathname || '/');
+            }
+
+            if (oauthError) {
+                showAuthContainer();
+                showBanner(oauthError, 'error');
+                return;
+            }
+
+            if (exchangeCode) {
+                await redeemExchangeCode(exchangeCode);
+                return;
+            }
+
+            if (code && state) {
+                await handleOAuthCallback(code, state);
+                return;
+            }
+
+            if (sessionToken) {
+                await loadUserProfile();
+                await loadTasks();
+            } else {
+                showAuthContainer();
+            }
         }
 
-        // Check for OAuth callback
-        if (window.location.search.includes('code=') && window.location.search.includes('state=')) {
-            console.log('OAuth callback detected, handling...');
-            handleOAuthCallback();
-        } else {
-            console.log('No OAuth callback, initializing normally...');
-            init();
-        }
-        
-        // Clear OAuth parameters from URL after handling
-        if (window.location.search) {
-            setTimeout(() => {
-                window.history.replaceState({}, document.title, '/auth.html');
-            }, 100);
-        }
+        bootstrap();
     </script>
 </body>
 </html>

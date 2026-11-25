@@ -204,8 +204,52 @@ class TestGoogleOAuthAndSessionIsolation(unittest.TestCase):
             },
             clear=False,
         ):
-            _, redirect_uri = build_google_authorization_url("http://localhost:3000", "state-789")
+            _, redirect_uri = build_google_authorization_url(
+                "http://localhost:3000",
+                "state-789",
+                requested_redirect_uri="http://localhost:3000/auth.html",
+            )
             self.assertEqual(redirect_uri, "https://example.run.app/auth/google/callback")
+
+    def test_local_same_origin_auth_html_redirect_allowed_and_untrusted_blocked(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "APP_URL": "",
+                "GOOGLE_APP_REDIRECT_URI": "",
+                "GOOGLE_CLIENT_ID": "test-client.apps.googleusercontent.com",
+                "GOOGLE_CLIENT_SECRET": "GOCSPX-test",
+            },
+            clear=False,
+        ):
+            _, allowed_uri = build_google_authorization_url(
+                "http://localhost:3000",
+                "state-local-1",
+                requested_redirect_uri="http://localhost:3000/auth.html",
+            )
+            self.assertEqual(allowed_uri, "http://localhost:3000/auth.html")
+
+            _, blocked_uri = build_google_authorization_url(
+                "http://localhost:3000",
+                "state-local-2",
+                requested_redirect_uri="https://evil.example/auth.html",
+            )
+            self.assertEqual(blocked_uri, "http://localhost:3000/auth/google/callback")
+
+    def test_app_serves_open_design_auth_html(self) -> None:
+        import importlib.util
+        from pathlib import Path
+
+        root_app_path = Path(__file__).resolve().parent.parent / "app.py"
+        spec = importlib.util.spec_from_file_location("root_app_module", root_app_path)
+        assert spec is not None and spec.loader is not None
+        root_app = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(root_app)
+
+        html_text = root_app._load_ui_html()
+        self.assertIn("--bg-primary: #0f1419", html_text)
+        self.assertIn('id="authSignInBtn"', html_text)
+        self.assertNotIn("innerHTML", html_text)
 
     def test_session_isolation_dedup_and_credential_wipe_on_signout(self) -> None:
         def fake_imap_fetcher(email_address, password, imap_host, imap_port=993, max_messages=20):
