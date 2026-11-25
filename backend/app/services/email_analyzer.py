@@ -28,6 +28,9 @@ _VALID_CATEGORIES = {
 }
 _EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
 _ISO_CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
+_UPI_ID_RE = re.compile(r"^[A-Za-z0-9._\-]{2,256}@[A-Za-z]{2,64}$")
+_IFSC_RE = re.compile(r"^[A-Z]{4}0[A-Z0-9]{6}$")
+_BANK_ACCT_RE = re.compile(r"^[0-9]{6,20}$")
 
 _ANALYSIS_RESPONSE_SCHEMA: Dict[str, Any] = {
     "type": "OBJECT",
@@ -62,6 +65,9 @@ _ANALYSIS_RESPONSE_SCHEMA: Dict[str, Any] = {
                 "currency": {"type": "STRING"},
                 "payee_name": {"type": "STRING"},
                 "payee_email": {"type": "STRING"},
+                "payee_upi_id": {"type": "STRING"},
+                "payee_bank_account": {"type": "STRING"},
+                "payee_ifsc": {"type": "STRING"},
                 "invoice_number": {"type": "STRING"},
                 "due_date": {"type": "STRING"},
                 "payment_reference": {"type": "STRING"},
@@ -72,6 +78,9 @@ _ANALYSIS_RESPONSE_SCHEMA: Dict[str, Any] = {
                 "currency",
                 "payee_name",
                 "payee_email",
+                "payee_upi_id",
+                "payee_bank_account",
+                "payee_ifsc",
                 "invoice_number",
                 "due_date",
                 "payment_reference",
@@ -136,8 +145,9 @@ _SYSTEM_INSTRUCTION = (
     "2. meeting_invite: The email schedules or invites the user to a meeting/call without explicitly requiring an email RSVP. "
     "Set requires_calendar=true, requires_rsvp=false, and populate calendar_event with exact ISO-8601 UTC start_iso and end_iso.\n"
     "3. payment_request: The email is an invoice, bill, or explicit payment request requiring money to be paid. "
-    "Set requires_payment=true and populate payment (numeric amount, 3-letter ISO currency like USD/INR/EUR, payee_name, "
-    "payee_email, invoice_number, due_date, payment_reference, payment_url). Do NOT mark promotional offers or already-paid receipts as requires_payment=true.\n"
+    "Set requires_payment=true and populate payment (numeric amount, 3-letter ISO currency like INR/USD/EUR, payee_name, "
+    "payee_email, payee_upi_id if a UPI ID/VPA is given, payee_bank_account and payee_ifsc if Indian bank details are given, "
+    "invoice_number, due_date, payment_reference, payment_url). Do NOT mark promotional offers or already-paid receipts as requires_payment=true.\n"
     "4. reply_needed: The email asks a question, requests confirmation, follow-up, or information from the user. "
     "Set requires_reply=true and draft a clear, professional, executive reply in draft_reply.\n"
     "5. informational: Newsletters, receipts, automated alerts, or FYI messages needing no reply, payment, or calendar event.\n"
@@ -239,15 +249,25 @@ def _sanitize_analysis_payload(
     amount: Optional[float] = None
     if isinstance(raw_amount, (int, float)) and raw_amount > 0:
         amount = round(float(raw_amount), 2)
-    currency = str(raw_payment.get("currency") or "USD").strip().upper()
+    currency = str(raw_payment.get("currency") or "INR").strip().upper()
     if not _ISO_CURRENCY_RE.match(currency):
-        currency = "USD"
+        currency = "INR"
     payment_url = sanitize_event_url(str(raw_payment.get("payment_url") or "")) or ""
+    raw_upi = str(raw_payment.get("payee_upi_id") or "").strip().lower()
+    clean_upi = raw_upi if _UPI_ID_RE.match(raw_upi) else ""
+    raw_acct = re.sub(r"\s+", "", str(raw_payment.get("payee_bank_account") or "").strip())
+    clean_acct = raw_acct if _BANK_ACCT_RE.match(raw_acct) else ""
+    raw_ifsc = str(raw_payment.get("payee_ifsc") or "").strip().upper()
+    clean_ifsc = raw_ifsc if _IFSC_RE.match(raw_ifsc) else ""
+
     payment = {
         "amount": amount,
         "currency": currency,
         "payee_name": _clean_single_line(raw_payment.get("payee_name") or sender, 160),
         "payee_email": _clean_email_addr(raw_payment.get("payee_email")) or default_reply_to,
+        "payee_upi_id": clean_upi,
+        "payee_bank_account": clean_acct,
+        "payee_ifsc": clean_ifsc,
         "invoice_number": _clean_single_line(raw_payment.get("invoice_number"), 100),
         "due_date": _clean_single_line(raw_payment.get("due_date"), 64),
         "payment_reference": _clean_single_line(raw_payment.get("payment_reference"), 160),

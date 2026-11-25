@@ -615,6 +615,40 @@
             margin-top: var(--spacing-lg);
         }
 
+        .modal-status-banner {
+            display: none;
+            margin-top: var(--spacing-md);
+            padding: var(--spacing-sm) var(--spacing-md);
+            border-radius: var(--radius-md);
+            font-size: 13px;
+            line-height: 1.45;
+            border: 1px solid var(--border-color);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        .modal-status-banner.visible {
+            display: block;
+        }
+
+        .modal-status-banner.error {
+            background: rgba(234, 67, 53, 0.14);
+            border-color: rgba(234, 67, 53, 0.45);
+            color: #fca5a5;
+        }
+
+        .modal-status-banner.info {
+            background: rgba(74, 158, 255, 0.14);
+            border-color: rgba(74, 158, 255, 0.4);
+            color: #b8d8ff;
+        }
+
+        .modal-status-banner.success {
+            background: rgba(52, 168, 83, 0.15);
+            border-color: rgba(52, 168, 83, 0.45);
+            color: #a7f3d0;
+        }
+
         /* Inline Status Banner */
         .status-banner {
             display: none;
@@ -754,6 +788,7 @@
         <div class="modal-content">
             <div class="modal-header" id="modalTitle"></div>
             <div id="modalBody"></div>
+            <div id="modalStatusBanner" class="modal-status-banner" role="alert"></div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" id="reanalyzeBtnModal" type="button">Analyze with AI</button>
                 <button class="btn btn-secondary" id="closeModalBtn" type="button">Close</button>
@@ -809,12 +844,43 @@
             const textEl = document.getElementById('statusBannerText');
             textEl.textContent = message;
             banner.className = `status-banner visible ${type}`;
+
+            const modal = document.getElementById('taskModal');
+            const modalBanner = document.getElementById('modalStatusBanner');
+            if (modal && modalBanner && modal.classList.contains('active')) {
+                modalBanner.textContent = message;
+                modalBanner.className = `modal-status-banner visible ${type}`;
+                modalBanner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        function hideModalBanner() {
+            const modalBanner = document.getElementById('modalStatusBanner');
+            if (modalBanner) {
+                modalBanner.className = 'modal-status-banner';
+                modalBanner.textContent = '';
+            }
         }
 
         function hideBanner() {
             const banner = document.getElementById('statusBanner');
             banner.className = 'status-banner';
             document.getElementById('statusBannerText').textContent = '';
+            hideModalBanner();
+        }
+
+        function extractErrorMessage(data, fallback) {
+            if (!data) return fallback;
+            if (typeof data.message === 'string' && data.message.trim()) return data.message;
+            if (typeof data.detail === 'string' && data.detail.trim()) return data.detail;
+            if (Array.isArray(data.detail) && data.detail.length > 0) {
+                const first = data.detail[0];
+                if (first && typeof first.msg === 'string') {
+                    const loc = Array.isArray(first.loc) ? first.loc.join('.') : '';
+                    return loc ? `${loc}: ${first.msg}` : first.msg;
+                }
+            }
+            return fallback;
         }
 
         function updateCapabilityBanner() {
@@ -1502,7 +1568,7 @@
                 const data = await parseJsonSafe(response);
                 if (!response.ok) {
                     setSyncState(false, 'Synced');
-                    showBanner(data.message || 'Failed to execute approved action.', 'error');
+                    showBanner(extractErrorMessage(data, `Action failed (HTTP ${response.status}).`), 'error');
                     if (data.error === 'scope_upgrade_required') {
                         await fetchCapabilities();
                     }
@@ -1763,24 +1829,46 @@
                 curInput.className = 'form-input';
                 curInput.id = 'modalPayCurrency';
                 curInput.maxLength = 3;
-                curInput.value = pay.currency || 'USD';
+                curInput.value = pay.currency || 'INR';
 
                 const invInput = document.createElement('input');
                 invInput.className = 'form-input';
                 invInput.readOnly = true;
                 invInput.value = pay.invoice_number || pay.payment_reference || 'N/A';
 
+                const upiInput = document.createElement('input');
+                upiInput.className = 'form-input';
+                upiInput.id = 'modalPayUpi';
+                upiInput.placeholder = 'e.g. vendor@icici or merchant@okaxis';
+                upiInput.value = pay.payee_upi_id || '';
+
+                const bankInput = document.createElement('input');
+                bankInput.className = 'form-input';
+                bankInput.id = 'modalPayBankAcct';
+                bankInput.placeholder = 'Optional if using UPI';
+                bankInput.value = pay.payee_bank_account || '';
+
+                const ifscInput = document.createElement('input');
+                ifscInput.className = 'form-input';
+                ifscInput.id = 'modalPayIfsc';
+                ifscInput.maxLength = 11;
+                ifscInput.placeholder = 'e.g. HDFC0001234';
+                ifscInput.value = pay.payee_ifsc || '';
+
                 payGrid.append(
                     createField('Payee', payeeInput),
                     createField('Amount', amtInput),
                     createField('Currency', curInput),
-                    createField('Invoice / Ref', invInput)
+                    createField('Invoice / Ref', invInput),
+                    createField('UPI ID (VPA)', upiInput, true),
+                    createField('Bank Account Number', bankInput),
+                    createField('IFSC Code', ifscInput)
                 );
                 paySection.appendChild(payGrid);
 
                 const warnEl = document.createElement('div');
                 warnEl.className = 'payment-warning';
-                warnEl.textContent = 'When checked, approving immediately submits this payment through your configured payment gateway with duplicate-charge protection.';
+                warnEl.textContent = 'When checked, approving immediately submits this payout via RazorpayX (UPI/IMPS/NEFT) or your configured payment gateway with duplicate-payout protection.';
                 paySection.appendChild(warnEl);
                 wrapper.appendChild(paySection);
 
@@ -1821,11 +1909,13 @@
                 reanalyzeBtn.style.display = 'none';
             }
 
+            hideModalBanner();
             modal.classList.add('active');
         }
 
         function closeModal() {
             document.getElementById('taskModal').classList.remove('active');
+            hideModalBanner();
             currentTaskId = null;
         }
 
@@ -1877,17 +1967,23 @@
                     return;
                 }
                 payload.payment_amount = amtVal;
-                payload.payment_currency = (document.getElementById('modalPayCurrency')?.value || 'USD').trim().toUpperCase();
+                payload.payment_currency = (document.getElementById('modalPayCurrency')?.value || 'INR').trim().toUpperCase();
                 payload.payment_payee = document.getElementById('modalPayee')?.value?.trim() || null;
+                payload.payment_upi_id = document.getElementById('modalPayUpi')?.value?.trim() || '';
+                payload.payment_bank_account = document.getElementById('modalPayBankAcct')?.value?.trim() || '';
+                payload.payment_ifsc = (document.getElementById('modalPayIfsc')?.value || '').trim().toUpperCase();
             }
 
             const btn = document.getElementById('approveBtnModal');
+            const originalLabel = btn.textContent;
             btn.disabled = true;
+            btn.textContent = 'Processing...';
             try {
                 const ok = await approveTask(id, payload);
                 if (ok) closeModal();
             } finally {
                 btn.disabled = false;
+                btn.textContent = originalLabel;
             }
         }
 
@@ -1895,12 +1991,15 @@
             if (!currentTaskId) return;
             const id = currentTaskId;
             const btn = document.getElementById('rejectBtnModal');
+            const originalLabel = btn.textContent;
             btn.disabled = true;
+            btn.textContent = 'Archiving...';
             try {
                 const ok = await rejectTask(id);
                 if (ok) closeModal();
             } finally {
                 btn.disabled = false;
+                btn.textContent = originalLabel;
             }
         }
 

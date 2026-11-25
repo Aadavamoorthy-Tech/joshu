@@ -66,6 +66,10 @@ class ApproveTaskRequest(BaseModel):
     payment_amount: Optional[float] = Field(default=None, gt=0)
     payment_currency: Optional[str] = Field(default=None, max_length=10)
     payment_payee: Optional[str] = Field(default=None, max_length=160)
+    payment_upi_id: Optional[str] = Field(default=None, max_length=160)
+    payment_bank_account: Optional[str] = Field(default=None, max_length=32)
+    payment_ifsc: Optional[str] = Field(default=None, max_length=16)
+    payment_mode: Optional[str] = Field(default=None, max_length=16)
 
     mark_read_and_move: bool = True
     target_folder: Optional[str] = Field(default=None, max_length=100)
@@ -512,12 +516,32 @@ def approve_task(
         currency = (
             payload.payment_currency
             if payload is not None and payload.payment_currency
-            else (ai_pay.get("currency") or "USD")
+            else (ai_pay.get("currency") or "INR")
         )
         payee_name = (
             payload.payment_payee
             if payload is not None and payload.payment_payee
             else (ai_pay.get("payee_name") or raw.get("organizer") or task.title)
+        )
+        payee_upi_id = (
+            payload.payment_upi_id
+            if payload is not None and payload.payment_upi_id is not None
+            else (ai_pay.get("payee_upi_id") or "")
+        )
+        payee_bank_account = (
+            payload.payment_bank_account
+            if payload is not None and payload.payment_bank_account is not None
+            else (ai_pay.get("payee_bank_account") or "")
+        )
+        payee_ifsc = (
+            payload.payment_ifsc
+            if payload is not None and payload.payment_ifsc is not None
+            else (ai_pay.get("payee_ifsc") or "")
+        )
+        payment_mode = (
+            payload.payment_mode
+            if payload is not None and payload.payment_mode is not None
+            else ""
         )
         try:
             payment_result = payment_executor_service.execute_payment(
@@ -527,6 +551,10 @@ def approve_task(
                 currency=str(currency),
                 payee_name=str(payee_name),
                 payee_email=str(ai_pay.get("payee_email") or ""),
+                payee_upi_id=str(payee_upi_id),
+                payee_bank_account=str(payee_bank_account),
+                payee_ifsc=str(payee_ifsc),
+                payment_mode=str(payment_mode),
                 invoice_number=str(ai_pay.get("invoice_number") or ""),
                 payment_reference=str(ai_pay.get("payment_reference") or ""),
             )
