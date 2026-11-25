@@ -2978,6 +2978,11 @@
             capabilities = null;
             tasks = [];
             pendingAnalysisCount = 0;
+            agentMessages = [];
+            currentAgentChatId = createNewAgentChatId();
+            if (typeof closeFloatingHistoryMenu === 'function') {
+                closeFloatingHistoryMenu();
+            }
             updateCapabilityBanner();
             try { localStorage.removeItem('sessionToken'); } catch (_) {}
 
@@ -3081,10 +3086,7 @@
                 agentMessages = normalizeAgentMessagesWithChatIds(Array.isArray(data.messages) ? data.messages : []);
                 agentRuntimeCode = typeof data.runtime_code === 'string' ? data.runtime_code : '';
                 if (!currentAgentChatId) {
-                    const sessions = getGroupedChatSessions();
-                    currentAgentChatId = sessions.length > 0
-                        ? sessions[sessions.length - 1].chatId
-                        : createNewAgentChatId();
+                    currentAgentChatId = createNewAgentChatId();
                 }
                 renderAgentState();
             } catch (_) {}
