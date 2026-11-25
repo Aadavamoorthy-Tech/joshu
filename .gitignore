@@ -5,3 +5,15 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# Database files (runtime-generated, not version-controlled)
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE and system files
+.vscode/extensions
+.DS_Store
+*.swp
+*.swo
+*~
