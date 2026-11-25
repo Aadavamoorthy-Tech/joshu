@@ -624,7 +624,7 @@
             document.getElementById('signInBtn').addEventListener('click', startSignIn);
             document.getElementById('authSignInBtn').addEventListener('click', startSignIn);
             document.getElementById('logoutBtn').addEventListener('click', logout);
-            document.getElementById('syncNowBtn').addEventListener('click', syncInboxNow);
+            document.getElementById('syncNowBtn').addEventListener('click', () => syncInboxNow(false));
             document.getElementById('statusBannerClose').addEventListener('click', hideBanner);
             document.getElementById('closeModalBtn').addEventListener('click', closeModal);
             document.getElementById('approveBtnModal').addEventListener('click', approveCurrentTask);
@@ -708,7 +708,7 @@
                     currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
                     updateHeader();
                     showMainContent();
-                    await loadTasks();
+                    await syncInboxNow(true);
                 } else {
                     showBanner('Authentication failed: ' + (data.message || 'Invalid sign-in code.'), 'error');
                     showAuthContainer();
@@ -734,7 +734,7 @@
                     currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
                     updateHeader();
                     showMainContent();
-                    await loadTasks();
+                    await syncInboxNow(true);
                 } else {
                     showBanner('Authentication failed: ' + (data.message || 'Unexpected response from server.'), 'error');
                     showAuthContainer();
@@ -788,9 +788,9 @@
             }
         }
 
-        async function syncInboxNow() {
+        async function syncInboxNow(silent = false) {
             if (!sessionToken) return;
-            hideBanner();
+            if (!silent) hideBanner();
             const btn = document.getElementById('syncNowBtn');
             btn.disabled = true;
             setSyncState(true, 'Syncing...');
@@ -808,14 +808,23 @@
                 if (!response.ok) {
                     showBanner(data.message || 'Could not sync inbox right now.', 'error');
                     setSyncState(false, 'Sync error');
+                    await loadTasks();
                     return;
                 }
                 await loadTasks();
                 const created = Number(data.created_tasks || 0);
-                showBanner(created > 0 ? `Synced ${created} new item${created === 1 ? '' : 's'} from your inbox.` : 'Inbox is up to date.', 'info');
+                if (!silent || created > 0) {
+                    showBanner(
+                        created > 0
+                            ? `Synced ${created} new item${created === 1 ? '' : 's'} from your inbox.`
+                            : `Inbox is up to date (${tasks.length} item${tasks.length === 1 ? '' : 's'} loaded).`,
+                        'info'
+                    );
+                }
             } catch (error) {
                 setSyncState(false, 'Sync error');
                 showBanner('Inbox sync failed: ' + error.message, 'error');
+                await loadTasks();
             } finally {
                 btn.disabled = false;
             }

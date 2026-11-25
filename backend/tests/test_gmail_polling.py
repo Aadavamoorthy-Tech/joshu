@@ -234,31 +234,32 @@ def test_sync_and_list_tasks_are_authenticated_deduplicated_and_tenant_isolated(
         # Unauthenticated request must fail with 401
         assert client.get("/tasks").status_code == 401
 
-        # Trigger sync for Alice
+        # Trigger sync for Alice (imports both calendar invite and inbox email)
         sync1 = client.post("/tasks/sync", headers={"Authorization": f"Bearer {token_a}"})
         assert sync1.status_code == 200
         body1 = sync1.json()
         assert body1["fetched_messages"] == 2
-        assert body1["created_tasks"] == 1
-        assert body1["ignored_non_invites"] == 1
+        assert body1["created_tasks"] == 2
+        assert body1["ignored_non_invites"] == 0
 
         # Re-running sync must deduplicate cleanly
         sync2 = client.post("/tasks/sync", headers={"Authorization": f"Bearer {token_a}"})
         assert sync2.status_code == 200
         assert sync2.json()["created_tasks"] == 0
-        assert sync2.json()["skipped_duplicates"] == 1
+        assert sync2.json()["skipped_duplicates"] == 2
 
-        # Alice sees her extracted task with meeting details
+        # Alice sees both her calendar invite and inbox email
         alice_tasks = client.get("/tasks", headers={"Authorization": f"Bearer {token_a}"})
         assert alice_tasks.status_code == 200
         items = alice_tasks.json()["tasks"]
-        assert len(items) == 1
-        task = items[0]
+        assert len(items) == 2
+        task = next(t for t in items if t["source"] == "calendar")
+        email_task = next(t for t in items if t["source"] == "email")
         assert task["title"] == "Investor Update Call"
-        assert task["source"] == "calendar"
         assert task["scheduled_for"] == "2026-12-10T18:00:00Z"
         assert task["attendees"] == ["founder@joshu.app", "cfo@joshu.app"]
         assert task["calendar_event_link"] == "https://calendar.google.com/calendar/event?eid=sample99"
+        assert email_task["title"] == "Monthly Receipt"
 
         # Bob must not see Alice's task (list or direct GET by ID)
         bob_tasks = client.get("/tasks", headers={"Authorization": f"Bearer {token_b}"})

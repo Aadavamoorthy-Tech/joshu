@@ -6,9 +6,11 @@ import asyncio
 import base64
 import logging
 import os
+import re
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from email.utils import getaddresses, parsedate_to_datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from google.auth.exceptions import RefreshError
@@ -22,17 +24,20 @@ from app.core.encryption import decrypt_secret, encrypt_secret
 from app.database import SessionLocal
 from app.models.session import Session as UserSession, utc_now
 from app.models.task import GoogleOAuthToken, Task
-from app.services.invite_parser import parse_gmail_invite_message
+from app.services.invite_parser import (
+    _extract_headers,
+    _strip_html,
+    _walk_mime_parts,
+    parse_gmail_invite_message,
+    sanitize_event_url,
+)
 
 logger = logging.getLogger("joshu.gmail_poller")
 
 DEFAULT_POLL_INTERVAL_MINUTES = 15
 DEFAULT_MAX_MESSAGES_PER_POLL = 25
-DEFAULT_GMAIL_QUERY = (
-    'has:attachment filename:ics OR '
-    'subject:("Invitation:" OR "Updated invitation:" OR "Canceled event:" OR "Calendar invite:") '
-    'newer_than:30d'
-)
+DEFAULT_GMAIL_QUERY = "in:inbox"
+_URL_PATTERN = re.compile(r"https://[^\s<>\"')\]}]+", re.IGNORECASE)
 
 
 class GmailPollingError(Exception):
@@ -202,18 +207,81 @@ def _default_gmail_service_factory(creds: Credentials) -> Any:
     return build_google_service("gmail", "v1", credentials=creds, cache_discovery=False)
 
 
+def _parse_regular_inbox_email(full_message: Dict[str, Any], msg_id: str) -> Dict[str, Any]:
+    """Normalize a standard non-invite Gmail inbox email into a sanitized pending task payload."""
+    payload = full_message.get("payload") or {}
+    headers = _extract_headers(payload)
+    parts = _walk_mime_parts(payload)
+
+    plain_text = "\n".join(parts["plain"]).strip()
+    html_text = "\n".join(_strip_html(h) for h in parts["html"]).strip()
+    clean_body = plain_text or html_text or str(full_message.get("snippet") or "").strip()
+    description = clean_body[:2000].strip() if clean_body else "No message body."
+
+    subject = (headers.get("subject") or "(No Subject)").strip()[:500]
+    sender = (headers.get("from") or "Unknown Sender").strip()
+
+    received_dt: Optional[datetime] = None
+    if headers.get("date"):
+        try:
+            dt = parsedate_to_datetime(headers["date"])
+            received_dt = dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+        except (TypeError, ValueError):
+            received_dt = None
+
+    recipients: List[str] = []
+    for hdr_key in ("to", "cc"):
+        raw_addr = headers.get(hdr_key)
+        if not raw_addr:
+            continue
+        for _, addr in getaddresses([raw_addr]):
+            normalized = addr.strip().lower()
+            if normalized and "@" in normalized and normalized not in recipients:
+                recipients.append(normalized)
+
+    first_safe_url: Optional[str] = None
+    for candidate in _URL_PATTERN.findall(plain_text + "\n" + "\n".join(parts["html"])):
+        safe = sanitize_event_url(candidate)
+        if safe:
+            first_safe_url = safe
+            break
+
+    return {
+        "title": subject,
+        "description": description,
+        "scheduled_for": received_dt,
+        "source": "email",
+        "external_message_id": msg_id,
+        "raw_data": {
+            "gmail_message_id": msg_id,
+            "gmail_thread_id": full_message.get("threadId"),
+            "organizer": sender,
+            "attendees": recipients,
+            "calendar_event_link": first_safe_url,
+            "subject": subject,
+            "date": headers.get("date"),
+        },
+    }
+
+
 class GmailPollingService:
-    """Polls Gmail calendar invitations for authenticated users and persists deduplicated tasks."""
+    """Polls Gmail inbox messages and calendar invitations for authenticated users."""
 
     def __init__(
         self,
         gmail_service_factory: Callable[[Credentials], Any] = _default_gmail_service_factory,
         query: Optional[str] = None,
         max_messages: Optional[int] = None,
+        include_general_emails: Optional[bool] = None,
     ) -> None:
         self._gmail_service_factory = gmail_service_factory
         self._query = query or os.getenv("GMAIL_POLL_QUERY", DEFAULT_GMAIL_QUERY)
         self._max_messages = max_messages or get_max_messages_per_poll()
+        self._include_general_emails = (
+            include_general_emails
+            if include_general_emails is not None
+            else _env_bool("GMAIL_INCLUDE_GENERAL_EMAILS", True)
+        )
 
     def poll_user_inbox(self, db: DBSession, user_id: int) -> SyncResult:
         """Fetch Gmail calendar invitations for a single user and insert any new tasks."""
@@ -312,26 +380,44 @@ class GmailPollingService:
                     logger.warning("Failed to fetch ICS attachment for message %s", msg_id)
 
             extracted = parse_gmail_invite_message(full_message, extra_ics_payloads=extra_ics)
-            if extracted is None:
+            now = utc_now()
+            if extracted is not None:
+                db.add(
+                    Task(
+                        id=str(uuid.uuid4()),
+                        user_id=user_id,
+                        title=extracted.title,
+                        description=extracted.description,
+                        scheduled_for=extracted.scheduled_for,
+                        source=extracted.source,
+                        status="pending",
+                        external_message_id=extracted.external_message_id,
+                        raw_data=extracted.raw_data,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            elif self._include_general_emails:
+                email_task = _parse_regular_inbox_email(full_message, msg_id)
+                db.add(
+                    Task(
+                        id=str(uuid.uuid4()),
+                        user_id=user_id,
+                        title=email_task["title"],
+                        description=email_task["description"],
+                        scheduled_for=email_task["scheduled_for"],
+                        source=email_task["source"],
+                        status="pending",
+                        external_message_id=email_task["external_message_id"],
+                        raw_data=email_task["raw_data"],
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            else:
                 ignored_non_invites += 1
                 continue
 
-            now = utc_now()
-            db.add(
-                Task(
-                    id=str(uuid.uuid4()),
-                    user_id=user_id,
-                    title=extracted.title,
-                    description=extracted.description,
-                    scheduled_for=extracted.scheduled_for,
-                    source=extracted.source,
-                    status="pending",
-                    external_message_id=extracted.external_message_id,
-                    raw_data=extracted.raw_data,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
             existing_ids.add(msg_id)
             created_count += 1
 
