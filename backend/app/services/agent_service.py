@@ -744,8 +744,25 @@ def _build_deterministic_tool_calls(user_message: str) -> List[Dict[str, Any]]:
             enable = not any(k in lower for k in ("disable", "stop", "turn off"))
             calls.append({"tool": "set_autonomy_rule", "rule": "auto_send_replies", "enabled": enable})
 
-    # 3. Detect Google Workspace service connection requests
-    if any(k in lower for k in ("connect", "integrate", "link", "enable", "add", "authorize", "service", "google")):
+    # 2b. Detect questions asking to view/list active autonomous rules or policies
+    if not calls and any(
+        phrase in lower
+        for phrase in (
+            "active rules",
+            "autonomous rules",
+            "show rules",
+            "what rules",
+            "my rules",
+            "current rules",
+            "policies",
+            "auto pay status",
+            "autopay status",
+        )
+    ):
+        calls.append({"tool": "show_autonomous_rules"})
+
+    # 3. Detect Google Workspace service connection requests or questions
+    if any(k in lower for k in ("connect", "connected", "integrate", "link", "enable", "add", "authorize", "service", "services", "google")):
         matched_any_service = False
         for svc_id, meta in GOOGLE_SERVICES_CATALOG.items():
             if any(kw in lower for kw in meta["keywords"]):
@@ -755,7 +772,19 @@ def _build_deterministic_tool_calls(user_message: str) -> List[Dict[str, Any]]:
                 matched_any_service = True
         if not matched_any_service and any(
             phrase in lower
-            for phrase in ("another service", "other service", "google service", "connect google", "more services")
+            for phrase in (
+                "another service",
+                "other service",
+                "google service",
+                "google services",
+                "connected service",
+                "connected services",
+                "connect google",
+                "more services",
+                "which services",
+                "what services",
+                "show services",
+            )
         ):
             calls.append({"tool": "list_connectable_google_services"})
 
@@ -942,6 +971,7 @@ def process_agent_chat(
                         f"AUTO_PAY_ENABLED = {enabled}, AUTO_PAY_MAX_AMOUNT = {max_amount:.2f} {currency}"
                     ),
                     "code_updated": True,
+                    "show_rules": True,
                     "code_file": "backend/app/services/agent_runtime_rules.py",
                     "code_snippet": updated_code,
                 }
@@ -1007,6 +1037,7 @@ def process_agent_chat(
                         "tool": "set_autonomy_rule",
                         "summary": f"{'Enabled' if enabled else 'Disabled'} {label_map[rule_key]} in agent_runtime_rules.py",
                         "code_updated": True,
+                        "show_rules": True,
                         "code_file": "backend/app/services/agent_runtime_rules.py",
                         "code_snippet": updated_code,
                     }
@@ -1028,6 +1059,18 @@ def process_agent_chat(
                             f"Immediately auto-processed {len(auto_ran)} matching pending task(s)."
                         )
 
+        elif t_name == "show_autonomous_rules":
+            actions_taken.append(
+                {
+                    "tool": "show_autonomous_rules",
+                    "summary": "Displayed active autonomous rules",
+                    "show_rules": True,
+                }
+            )
+            action_summaries.append(
+                "Here are your current autonomous rules. You can click any rule below to toggle it or ask me to update a threshold:"
+            )
+
         elif t_name == "connect_google_service":
             svc_id = str(call.get("service_id") or "").strip().lower()
             meta = GOOGLE_SERVICES_CATALOG.get(svc_id)
@@ -1048,30 +1091,27 @@ def process_agent_chat(
                         "connect_service": meta["id"],
                         "service_name": meta["name"],
                         "scopes": meta["scopes"],
+                        "show_services": True,
                     }
                 )
                 action_summaries.append(
                     f"I have configured Joshu to connect with {meta['name']} ({meta['description']}). "
-                    f"Click the 'Authorize {meta['name']} with Google OAuth' button below to grant permission."
+                    f"Click the 'Authorize {meta['name']} with Google OAuth' button below (or any service pill) to grant permission."
                 )
 
         elif t_name == "list_connectable_google_services":
             svc_list = list_google_services_for_user(db, user.id)
-            for s in svc_list:
-                if not s["connected"]:
-                    actions_taken.append(
-                        {
-                            "tool": "connect_google_service",
-                            "summary": f"Available to connect: {s['name']}",
-                            "connect_service": s["id"],
-                            "service_name": s["name"],
-                            "scopes": s["scopes"],
-                        }
-                    )
+            actions_taken.append(
+                {
+                    "tool": "list_connectable_google_services",
+                    "summary": "Displayed Google Workspace services connected to Joshu",
+                    "show_services": True,
+                }
+            )
             names = ", ".join(s["name"] for s in svc_list)
             action_summaries.append(
-                f"You can connect any of these Google Workspace services to Joshu: {names}. "
-                f"Click any connection button below or tell me which service you want to connect (for example: 'Connect Google Drive' or 'Connect Google Sheets')."
+                f"Here are the Google Workspace services available in Joshu ({names}). "
+                f"Click any service below to connect or authorize it via Google OAuth:"
             )
 
         elif t_name == "approve_task":
