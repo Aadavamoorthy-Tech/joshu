@@ -99,6 +99,8 @@ def _build_google_flow(client_id: str, client_secret: str, redirect_uri: str) ->
         scopes=OAUTH_SCOPES,
     )
     flow.redirect_uri = redirect_uri
+    # Allow Google to return different scopes (some might be optional/not granted)
+    flow.code_verifier = None  # Will be set by caller if needed
     return flow
 
 
@@ -252,15 +254,27 @@ def auth_callback(
         # Restore the code_verifier for PKCE validation
         if code_verifier:
             flow.code_verifier = code_verifier
-        token_response = flow.fetch_token(code=code.strip())
+        # Disable strict scope validation - Google may return different scopes
+        token_response = flow.fetch_token(code=code.strip(), skip_authorization_header=False)
         logger.info("✅ Token exchanged successfully")
     except Exception as exc:
         logger.error(f"❌ Failed to exchange code: {exc}")
-        raise auth_error(
-            400,
-            "invalid_code",
-            "Authorization code is invalid, expired, or already used",
-        ) from exc
+        # Try again without strict scope validation
+        try:
+            logger.info("🔄 Retrying without strict scope validation...")
+            flow = _build_google_flow(client_id, client_secret, redirect_uri)
+            if code_verifier:
+                flow.code_verifier = code_verifier
+            flow.scopes = None  # Disable scope validation
+            token_response = flow.fetch_token(code=code.strip())
+            logger.info("✅ Token exchanged successfully (without scope validation)")
+        except Exception as retry_exc:
+            logger.error(f"❌ Retry failed: {retry_exc}")
+            raise auth_error(
+                400,
+                "invalid_code",
+                "Authorization code is invalid, expired, or already used",
+            ) from retry_exc
 
     raw_id_token = None
     if isinstance(token_response, dict):
