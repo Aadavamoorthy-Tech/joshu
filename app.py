@@ -419,6 +419,25 @@ class JoshuHandler(BaseHTTPRequestHandler):
             self._handle_list_tasks(qs)
             return
 
+        if path == "/agent/state":
+            token, _ = self._resolve_auth_token(require_csrf=False)
+            session = SESSION_MANAGER.get_session(token)
+            if session is None:
+                self._send_json(401, {"error": "unauthorized", "message": "Sign in required."})
+                return
+            from preview_server.agent_engine import list_google_services, read_runtime_rules_file
+
+            self._send_json(
+                200,
+                {
+                    "policy": dict(session.agent_policy),
+                    "google_services": list_google_services(session),
+                    "messages": list(session.agent_messages),
+                    "runtime_code": read_runtime_rules_file(session.agent_policy),
+                },
+            )
+            return
+
         self._send_json(404, {"error": "not_found", "message": "Route not found."})
 
     def do_POST(self) -> None:
@@ -529,6 +548,32 @@ class JoshuHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/agent/chat":
+            token, csrf_failed = self._resolve_auth_token(require_csrf=True)
+            if csrf_failed:
+                self._send_json(
+                    403,
+                    {
+                        "error": "csrf_header_required",
+                        "message": "Missing required X-Requested-With header.",
+                    },
+                )
+                return
+            session = SESSION_MANAGER.get_session(token)
+            if session is None:
+                self._send_json(401, {"error": "unauthorized", "message": "Sign in required."})
+                return
+            body = self._read_json_body()
+            message = str(body.get("message") or "").strip()
+            if not message:
+                self._send_json(400, {"error": "bad_request", "message": "Prompt message cannot be empty."})
+                return
+            from preview_server.agent_engine import process_preview_agent_chat
+
+            result = process_preview_agent_chat(session, message)
+            self._send_json(200, result)
+            return
+
         if path in ("/api/tasks/sync", "/tasks/sync"):
             self._handle_sync_tasks()
             return
@@ -570,6 +615,75 @@ class JoshuHandler(BaseHTTPRequestHandler):
                 self._send_json(401, {"error": "unauthorized", "message": "Session expired. Please sign in again."})
                 return
             self._send_json(200, {"session": session.to_public_dict()})
+            return
+
+        if parsed.path == "/agent/policy":
+            token, csrf_failed = self._resolve_auth_token(require_csrf=True)
+            if csrf_failed:
+                self._send_json(
+                    403,
+                    {
+                        "error": "csrf_header_required",
+                        "message": "Missing required X-Requested-With header.",
+                    },
+                )
+                return
+            session = SESSION_MANAGER.get_session(token)
+            if session is None:
+                self._send_json(401, {"error": "unauthorized", "message": "Sign in required."})
+                return
+            body = self._read_json_body()
+            from preview_server.agent_engine import (
+                apply_policy_to_session_tasks,
+                sync_runtime_rules_file,
+            )
+
+            policy = session.agent_policy
+            if "auto_pay_enabled" in body and body["auto_pay_enabled"] is not None:
+                policy["auto_pay_enabled"] = bool(body["auto_pay_enabled"])
+            if "auto_pay_max_amount" in body and body["auto_pay_max_amount"] is not None:
+                policy["auto_pay_max_amount"] = round(float(body["auto_pay_max_amount"]), 2)
+            if "auto_pay_currency" in body and body["auto_pay_currency"] is not None:
+                policy["auto_pay_currency"] = str(body["auto_pay_currency"] or "INR").strip().upper()[:16]
+            if "auto_archive_informational" in body and body["auto_archive_informational"] is not None:
+                policy["auto_archive_informational"] = bool(body["auto_archive_informational"])
+            if "auto_add_calendar_invites" in body and body["auto_add_calendar_invites"] is not None:
+                policy["auto_add_calendar_invites"] = bool(body["auto_add_calendar_invites"])
+            if "auto_send_replies" in body and body["auto_send_replies"] is not None:
+                policy["auto_send_replies"] = bool(body["auto_send_replies"])
+            runtime_code = sync_runtime_rules_file(policy)
+            auto_executed = apply_policy_to_session_tasks(session)
+            self._send_json(
+                200,
+                {
+                    "policy": dict(policy),
+                    "auto_executed": auto_executed,
+                    "runtime_code": runtime_code,
+                },
+            )
+            return
+
+        self._send_json(404, {"error": "not_found", "message": "Route not found."})
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path == "/agent/history":
+            token, csrf_failed = self._resolve_auth_token(require_csrf=True)
+            if csrf_failed:
+                self._send_json(
+                    403,
+                    {
+                        "error": "csrf_header_required",
+                        "message": "Missing required X-Requested-With header.",
+                    },
+                )
+                return
+            session = SESSION_MANAGER.get_session(token)
+            if session is None:
+                self._send_json(401, {"error": "unauthorized", "message": "Sign in required."})
+                return
+            session.agent_messages.clear()
+            self._send_json(200, {"status": "cleared"})
             return
 
         self._send_json(404, {"error": "not_found", "message": "Route not found."})

@@ -1406,8 +1406,8 @@
                             id="agentPromptInput"
                             class="agent-prompt-input"
                             rows="1"
-                            placeholder="Ask Agent"
-                            aria-label="Ask Agent"
+                            placeholder="Ask agent"
+                            aria-label="Ask agent"
                         ></textarea>
                         <button
                             type="button"
@@ -1433,7 +1433,8 @@
             <p style="color: var(--text-secondary); margin-bottom: var(--spacing-lg); font-size: 14px;">
                 AI-powered inbox triage, drafted replies, automatic payments, Google Calendar scheduling, and smart inbox archiving.
             </p>
-            <button id="authSignInBtn" class="btn btn-signin" style="width: 100%;">Sign In with Google</button>
+            <button id="authSignInBtn" class="btn btn-signin" style="width: 100%;" type="button">Sign In with Google</button>
+            <div id="authBoxStatus" style="margin-top: 14px; font-size: 13px; line-height: 1.5; display: none;"></div>
         </div>
     </div>
 
@@ -1471,6 +1472,8 @@
         let agentMessages = [];
         let agentRuntimeCode = '';
         let agentSending = false;
+        let apiBaseReadyPromise = null;
+        let prefetchedSignInUrl = null;
 
         // Clear any legacy token previously saved in localStorage
         try { localStorage.removeItem('sessionToken'); } catch (_) {}
@@ -1483,23 +1486,85 @@
             return headers;
         }
 
-        async function resolveApiBase() {
+        async function _doResolveApiBase() {
             const host = window.location.hostname;
             const isLocal = host === 'localhost' || host === '127.0.0.1';
             if (!isLocal) {
                 apiBase = window.location.origin;
                 return;
             }
+            const controller = new AbortController();
+            const timer = window.setTimeout(() => controller.abort(), 1500);
             try {
                 const probe = await fetch(`${window.location.origin}/api/config`, {
                     credentials: 'include',
+                    signal: controller.signal,
                 });
                 if (probe.ok) {
                     apiBase = window.location.origin;
                     return;
                 }
-            } catch (_) {}
+            } catch (_) {
+            } finally {
+                window.clearTimeout(timer);
+            }
             apiBase = `http://${host}:8000`;
+        }
+
+        function resolveApiBase() {
+            if (!apiBaseReadyPromise) {
+                apiBaseReadyPromise = _doResolveApiBase();
+            }
+            return apiBaseReadyPromise;
+        }
+
+        async function prefetchGoogleSignInUrl() {
+            try {
+                await resolveApiBase();
+                const redirectUri = `${window.location.origin}/auth.html`;
+                const response = await fetch(`${apiBase}/auth/signin`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ redirect_uri: redirectUri, force_consent: false }),
+                });
+                if (!response.ok) return;
+                const data = await parseJsonSafe(response);
+                const url = data.redirect_url || data.auth_url;
+                if (url && url.startsWith('https://')) {
+                    prefetchedSignInUrl = url;
+                }
+            } catch (_) {}
+        }
+
+        function showAuthBoxMessage(message, isError = true, externalUrl = null) {
+            const box = document.getElementById('authBoxStatus');
+            if (!box) return;
+            box.replaceChildren();
+            if (!message && !externalUrl) {
+                box.style.display = 'none';
+                return;
+            }
+            box.style.display = 'block';
+            box.style.color = isError ? '#fca5a5' : 'var(--text-secondary)';
+            if (message) {
+                const p = document.createElement('div');
+                p.textContent = message;
+                box.appendChild(p);
+            }
+            if (externalUrl && externalUrl.startsWith('https://')) {
+                const link = document.createElement('a');
+                link.href = externalUrl;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.className = 'btn btn-signin';
+                link.style.display = 'inline-block';
+                link.style.marginTop = '10px';
+                link.style.textDecoration = 'none';
+                link.style.width = '100%';
+                link.textContent = 'Continue to Google Account Chooser ↗';
+                box.appendChild(link);
+            }
         }
 
         function showBanner(message, type = 'error') {
@@ -1507,6 +1572,11 @@
             const textEl = document.getElementById('statusBannerText');
             textEl.textContent = message;
             banner.className = `status-banner visible ${type}`;
+
+            const authContainer = document.getElementById('authContainer');
+            if (authContainer && authContainer.style.display !== 'none' && type === 'error') {
+                showAuthBoxMessage(message, true);
+            }
 
             const modal = document.getElementById('taskModal');
             const modalBanner = document.getElementById('modalStatusBanner');
@@ -1530,6 +1600,7 @@
             banner.className = 'status-banner';
             document.getElementById('statusBannerText').textContent = '';
             hideModalBanner();
+            showAuthBoxMessage('');
         }
 
         function extractErrorMessage(data, fallback) {
@@ -1627,16 +1698,28 @@
                 clearChatBtn.addEventListener('click', clearAgentChatHistory);
             }
 
-            window.addEventListener('message', (event) => {
-                if (event.origin !== window.location.origin) return;
-                const payload = event.data;
+            const handleOAuthMessagePayload = (payload) => {
                 if (!payload || payload.type !== 'joshu-google-oauth') return;
                 if (payload.exchange_code) {
                     redeemExchangeCode(payload.exchange_code);
                 } else if (payload.error) {
                     showBanner(String(payload.error), 'error');
                 }
+            };
+
+            window.addEventListener('message', (event) => {
+                if (event.origin !== window.location.origin) return;
+                handleOAuthMessagePayload(event.data);
             });
+
+            try {
+                if (typeof BroadcastChannel !== 'undefined') {
+                    const oauthChannel = new BroadcastChannel('joshu_oauth');
+                    oauthChannel.addEventListener('message', (event) => {
+                        handleOAuthMessagePayload(event.data);
+                    });
+                }
+            } catch (_) {}
         }
 
         function setSyncState(syncing, label) {
@@ -1648,21 +1731,61 @@
             labelEl.textContent = label;
         }
 
+        function openExternalOAuthUrl(targetUrl) {
+            const isEmbedded = window.self !== window.top;
+            if (!isEmbedded) {
+                window.location.assign(targetUrl);
+                return;
+            }
+            const a = document.createElement('a');
+            a.href = targetUrl;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            const authContainer = document.getElementById('authContainer');
+            if (authContainer && authContainer.style.display !== 'none') {
+                showAuthBoxMessage(
+                    'Google Sign-In opened in a new browser tab. If your browser blocked the new tab, click below:',
+                    false,
+                    targetUrl
+                );
+            } else {
+                showBanner('Google authorization opened in a new browser tab.', 'info');
+            }
+        }
+
         async function startSignIn(forceConsent = false, extraScopes = null) {
             hideBanner();
-            const signInButtons = [
-                document.getElementById('authSignInBtn'),
-                document.getElementById('reconnectGoogleBtn'),
-            ];
+            const isEmbedded = window.self !== window.top;
+            const hasExtraScopes = Array.isArray(extraScopes) && extraScopes.length > 0;
+
+            // Fast synchronous path for embedded preview iframes so browser popup blockers never block the new tab
+            if (isEmbedded && !forceConsent && !hasExtraScopes && prefetchedSignInUrl) {
+                const readyUrl = prefetchedSignInUrl;
+                prefetchedSignInUrl = null;
+                openExternalOAuthUrl(readyUrl);
+                prefetchGoogleSignInUrl();
+                return;
+            }
+
+            const authBtn = document.getElementById('authSignInBtn');
+            const reconnectBtn = document.getElementById('reconnectGoogleBtn');
+            const signInButtons = [authBtn, reconnectBtn];
             signInButtons.forEach((b) => { if (b) b.disabled = true; });
+            if (authBtn) authBtn.textContent = 'Connecting to Google...';
 
             try {
+                await resolveApiBase();
                 const redirectUri = `${window.location.origin}/auth.html`;
                 const reqBody = {
                     redirect_uri: redirectUri,
                     force_consent: Boolean(forceConsent),
                 };
-                if (Array.isArray(extraScopes) && extraScopes.length > 0) {
+                if (hasExtraScopes) {
                     reqBody.extra_scopes = extraScopes;
                 }
                 const response = await fetch(`${apiBase}/auth/signin`, {
@@ -1674,13 +1797,16 @@
 
                 const data = await parseJsonSafe(response);
                 if (!response.ok) {
-                    showBanner('Sign-in failed: ' + (data.message || `HTTP ${response.status}`), 'error');
+                    showBanner('Sign-in failed: ' + extractErrorMessage(data, `HTTP ${response.status}`), 'error');
                     return;
                 }
 
                 const targetUrl = data.redirect_url || data.auth_url;
                 if (targetUrl && targetUrl.startsWith('https://')) {
-                    window.location.href = targetUrl;
+                    openExternalOAuthUrl(targetUrl);
+                    if (isEmbedded) {
+                        prefetchGoogleSignInUrl();
+                    }
                 } else {
                     showBanner('No valid redirect URL received from server.', 'error');
                 }
@@ -1688,6 +1814,7 @@
                 showBanner('Failed to start sign-in process: ' + error.message, 'error');
             } finally {
                 signInButtons.forEach((b) => { if (b) b.disabled = false; });
+                if (authBtn) authBtn.textContent = 'Sign In with Google';
             }
         }
 
@@ -2808,6 +2935,9 @@
             document.getElementById('syncNowBtn').style.display = 'none';
             document.getElementById('logoutBtn').style.display = 'none';
             document.getElementById('capabilityBar').classList.remove('visible');
+            if (window.self !== window.top) {
+                prefetchGoogleSignInUrl();
+            }
         }
 
         async function loadAgentState() {

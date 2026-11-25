@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from preview_server.agent_engine import default_agent_policy
 from preview_server.google_oauth_service import (
     GoogleTokenExpiredError,
     build_google_authorization_url,
@@ -91,6 +92,9 @@ class MailboxSession:
     _request_origin: str = field(default="http://localhost:3000", repr=False)
 
     tasks: List[Dict[str, Any]] = field(default_factory=list)
+    agent_policy: Dict[str, Any] = field(default_factory=default_agent_policy)
+    agent_messages: List[Dict[str, Any]] = field(default_factory=list)
+    agent_connected_services: List[str] = field(default_factory=lambda: ["gmail", "calendar"])
     stop_event: threading.Event = field(default_factory=threading.Event, repr=False)
     poller_thread: Optional[threading.Thread] = field(default=None, repr=False)
 
@@ -381,15 +385,22 @@ class SessionManager:
         return session_token, session, created_count
 
     def redeem_exchange_code(self, exchange_code: str) -> Optional[Tuple[str, MailboxSession, int]]:
-        """Redeem a single-use short-lived exchange code for the active session token."""
+        """Redeem a short-lived exchange code for the active session token."""
         now = datetime.now(timezone.utc)
         with self._lock:
             self._prune_ephemeral_locked()
-            entry = self._exchange_codes.pop((exchange_code or "").strip(), None)
+            clean_code = (exchange_code or "").strip()
+            entry = self._exchange_codes.get(clean_code)
             if entry is None or entry.expires_at <= now:
+                self._exchange_codes.pop(clean_code, None)
                 return None
+            # Keep valid for a brief 15-second grace window so both the OAuth tab and an embedded preview iframe can redeem it
+            grace_expiry = now + timedelta(seconds=15)
+            if entry.expires_at > grace_expiry:
+                entry.expires_at = grace_expiry
             session = self._sessions.get(entry.session_token)
             if session is None:
+                self._exchange_codes.pop(clean_code, None)
                 return None
             return entry.session_token, session, entry.initial_synced
 

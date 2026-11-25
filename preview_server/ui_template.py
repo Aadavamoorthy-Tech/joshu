@@ -95,6 +95,19 @@ def build_oauth_callback_html(
     (function() {{
       const code = {code_json};
       if (code) {{
+        const msg = {{ type: "joshu-google-oauth", exchange_code: code }};
+        try {{
+          if (typeof BroadcastChannel !== "undefined") {{
+            const bc = new BroadcastChannel("joshu_oauth");
+            bc.postMessage(msg);
+            setTimeout(() => {{ try {{ bc.close(); }} catch (_) {{}} }}, 300);
+          }}
+        }} catch (_) {{}}
+        try {{
+          if (window.opener && !window.opener.closed) {{
+            window.opener.postMessage(msg, window.location.origin);
+          }}
+        }} catch (_) {{}}
         window.location.replace("/#oauth_code=" + encodeURIComponent(code));
       }} else {{
         window.location.replace("/");
