@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -18,10 +19,8 @@ from app.models.agent import AgentMessage, AgentPolicy
 from app.models.session import User, utc_now
 from app.models.task import GoogleOAuthToken, Task
 from app.services.email_analyzer import (
-    GEMINI_API_BASE_URL,
-    _FALLBACK_GEMINI_MODELS,
-    _clean_api_key,
-    get_configured_gemini_model,
+    GEMINI_API_BASE,
+    get_gemini_model,
 )
 from app.services.google_actions import (
     GoogleActionError,
@@ -39,6 +38,23 @@ logger = logging.getLogger("joshu.agent_service")
 
 RUNTIME_RULES_PATH = Path(__file__).resolve().parent / "agent_runtime_rules.py"
 _SAFE_CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
+_FALLBACK_GEMINI_MODELS: Tuple[str, ...] = (
+    "gemini-4-hydrogen",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+)
+
+
+def _clean_api_key() -> str:
+    key = (os.getenv("GEMINI_API_KEY") or "").strip()
+    if not key:
+        return ""
+    upper = key.upper()
+    if any(upper.startswith(p) for p in ("YOUR_", "REPLACE_", "<")):
+        return ""
+    return key
 
 GOOGLE_SERVICES_CATALOG: Dict[str, Dict[str, Any]] = {
     "gmail": {
@@ -200,6 +216,16 @@ def serialize_agent_policy(policy: AgentPolicy) -> Dict[str, Any]:
         "extra_google_scopes": extra_scopes,
         "memory_notes": notes,
         "updated_at": _format_utc(policy.updated_at),
+    }
+
+
+def serialize_agent_message(msg: AgentMessage) -> Dict[str, Any]:
+    return {
+        "id": msg.id,
+        "role": msg.role,
+        "content": msg.content,
+        "actions_taken": msg.actions_taken if isinstance(msg.actions_taken, list) else [],
+        "created_at": _format_utc(msg.created_at),
     }
 
 
@@ -635,7 +661,7 @@ def _call_gemini_agent_brain(
         f"User Prompt: {user_message}"
     )
 
-    primary = get_configured_gemini_model()
+    primary = get_gemini_model()
     models_to_try: List[str] = [primary]
     for m in _FALLBACK_GEMINI_MODELS:
         if m not in models_to_try:
@@ -650,7 +676,7 @@ def _call_gemini_agent_brain(
     }
 
     for model_name in models_to_try:
-        endpoint = f"{GEMINI_API_BASE_URL}/{model_name}:generateContent"
+        endpoint = f"{GEMINI_API_BASE}/{model_name}:generateContent"
         try:
             resp = requests.post(
                 endpoint,
@@ -915,6 +941,7 @@ def process_agent_chat(
                         f"Updated code in backend/app/services/agent_runtime_rules.py: "
                         f"AUTO_PAY_ENABLED = {enabled}, AUTO_PAY_MAX_AMOUNT = {max_amount:.2f} {currency}"
                     ),
+                    "code_updated": True,
                     "code_file": "backend/app/services/agent_runtime_rules.py",
                     "code_snippet": updated_code,
                 }
@@ -979,6 +1006,7 @@ def process_agent_chat(
                     {
                         "tool": "set_autonomy_rule",
                         "summary": f"{'Enabled' if enabled else 'Disabled'} {label_map[rule_key]} in agent_runtime_rules.py",
+                        "code_updated": True,
                         "code_file": "backend/app/services/agent_runtime_rules.py",
                         "code_snippet": updated_code,
                     }
@@ -1017,17 +1045,14 @@ def process_agent_chat(
                     {
                         "tool": "connect_google_service",
                         "summary": f"Prepared Google OAuth connection for {meta['name']}",
-                        "connect_service": {
-                            "id": meta["id"],
-                            "name": meta["name"],
-                            "scopes": meta["scopes"],
-                            "description": meta["description"],
-                        },
+                        "connect_service": meta["id"],
+                        "service_name": meta["name"],
+                        "scopes": meta["scopes"],
                     }
                 )
                 action_summaries.append(
-                    f"I have configured Joshu to connect with **{meta['name']}** ({meta['description']}). "
-                    f"Click the **Connect {meta['name']} with Google** button below to grant permission via Google OAuth."
+                    f"I have configured Joshu to connect with {meta['name']} ({meta['description']}). "
+                    f"Click the 'Authorize {meta['name']} with Google OAuth' button below to grant permission."
                 )
 
         elif t_name == "list_connectable_google_services":
@@ -1038,12 +1063,9 @@ def process_agent_chat(
                         {
                             "tool": "connect_google_service",
                             "summary": f"Available to connect: {s['name']}",
-                            "connect_service": {
-                                "id": s["id"],
-                                "name": s["name"],
-                                "scopes": s["scopes"],
-                                "description": s["description"],
-                            },
+                            "connect_service": s["id"],
+                            "service_name": s["name"],
+                            "scopes": s["scopes"],
                         }
                     )
             names = ", ".join(s["name"] for s in svc_list)
