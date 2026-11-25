@@ -10,7 +10,7 @@ import uuid
 from datetime import timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from google_auth_oauthlib.flow import Flow
@@ -19,7 +19,14 @@ from sqlalchemy.orm import Session as DBSession
 
 from app.core.encryption import encrypt_secret
 from app.database import get_db
-from app.middleware.auth import auth_error, extract_bearer_token, get_current_session
+from app.middleware.auth import (
+    auth_error,
+    clear_session_cookie,
+    get_current_session,
+    resolve_session_token,
+    set_session_cookie,
+    verify_cookie_csrf,
+)
 from app.models.session import OAuthState, Session as UserSession, User, utc_now
 from app.models.task import GoogleOAuthToken
 
@@ -245,6 +252,8 @@ def auth_signin(
 
 @router.get("/callback")
 def auth_callback(
+    request: Request,
+    response: Response,
     code: Optional[str] = Query(default=None),
     state: Optional[str] = Query(default=None),
     error: Optional[str] = Query(default=None),
@@ -419,6 +428,13 @@ def auth_callback(
             "Failed to persist user session",
         ) from exc
 
+    set_session_cookie(
+        response=response,
+        request=request,
+        session_id=session_id,
+        max_age_seconds=expiry_days * 86400,
+    )
+
     return {
         "session_token": session_id,
         "user": {
@@ -432,6 +448,8 @@ def auth_callback(
 
 @router.post("/refresh")
 def auth_refresh(
+    request: Request,
+    response: Response,
     current_session: UserSession = Depends(get_current_session),
     db: DBSession = Depends(get_db),
 ) -> Dict[str, Any]:
@@ -462,6 +480,13 @@ def auth_refresh(
             "Failed to extend user session",
         ) from exc
 
+    set_session_cookie(
+        response=response,
+        request=request,
+        session_id=new_session_id,
+        max_age_seconds=expiry_days * 86400,
+    )
+
     user = current_session.user
     return {
         "session_token": new_session_id,
@@ -476,20 +501,31 @@ def auth_refresh(
 
 @router.post("/logout")
 def auth_logout(
+    request: Request,
+    response: Response,
     authorization: Optional[str] = Header(default=None),
     db: DBSession = Depends(get_db),
 ) -> Dict[str, str]:
-    """Revoke the caller's session by marking `is_active = False`."""
-    token = extract_bearer_token(authorization)
+    """Revoke the caller's session by marking `is_active = False` and clearing the cookie."""
+    token, via_cookie = resolve_session_token(request=request, authorization=authorization)
+    if via_cookie:
+        verify_cookie_csrf(request)
+
     session_record = db.query(UserSession).filter(UserSession.id == token).first()
 
     if session_record is None:
+        clear_session_cookie(response=response, request=request)
+        if via_cookie:
+            return {"message": "Logged out successfully"}
         raise auth_error(404, "session_not_found", "Session not found")
 
     if not session_record.is_active or utc_now() >= session_record.expires_at:
         if session_record.is_active:
             session_record.is_active = False
             db.commit()
+        clear_session_cookie(response=response, request=request)
+        if via_cookie:
+            return {"message": "Logged out successfully"}
         raise auth_error(401, "invalid_session", "Session token is invalid or expired")
 
     try:
@@ -503,6 +539,7 @@ def auth_logout(
             "Failed to revoke user session",
         ) from exc
 
+    clear_session_cookie(response=response, request=request)
     return {"message": "Logged out successfully"}
 
 

@@ -489,6 +489,14 @@ def fetch_gmail_api_inbox_messages(
         raise GoogleOAuthError(f"Gmail API request failed (HTTP {status}).")
 
     stubs = list_payload.get("messages") or []
+    if not stubs:
+        fallback_url = (
+            f"{GMAIL_API_BASE}/messages?"
+            f"{urlencode({'q': '-in:trash -in:spam', 'maxResults': max_messages})}"
+        )
+        fb_status, fb_payload = _http_json(fallback_url, method="GET", headers=auth_headers)
+        if fb_status == 200:
+            stubs = fb_payload.get("messages") or []
     tasks: List[Dict[str, Any]] = []
 
     for stub in stubs:

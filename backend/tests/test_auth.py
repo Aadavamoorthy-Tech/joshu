@@ -347,3 +347,57 @@ def test_logout_deactivates_session_and_rejects_expired_tokens(
     row = db_session.query(UserSession).filter_by(id=active_token).first()
     assert row is not None
     assert row.is_active is False
+
+
+def test_httponly_cookie_persists_across_refresh_and_enforces_csrf(
+    db_session,
+    configured_oauth,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        auth_routes,
+        "_build_google_flow",
+        lambda cid, csec, uri: _FakeFlow(uri),
+    )
+    monkeypatch.setattr(
+        auth_routes,
+        "_verify_google_id_token",
+        lambda raw, cid: {
+            "sub": "google-sub-cookie",
+            "email": "cookie@example.com",
+            "name": "Cookie User",
+            "picture": None,
+        },
+    )
+
+    with TestClient(app) as client:
+        signin = client.post("/auth/signin")
+        state = parse_qs(urlparse(signin.json()["redirect_url"]).query)["state"][0]
+
+        callback = client.get("/auth/callback", params={"code": "valid-code", "state": state})
+        assert callback.status_code == 200
+        set_cookie = callback.headers.get("set-cookie", "")
+        assert "joshu_session=" in set_cookie
+        assert "HttpOnly" in set_cookie
+
+        # Simulated page refresh: /auth/me succeeds with HttpOnly cookie only
+        me = client.get("/auth/me")
+        assert me.status_code == 200
+        assert me.json()["user"]["email"] == "cookie@example.com"
+
+        # Mutating cookie request without X-Requested-With is blocked
+        blocked = client.post("/auth/refresh")
+        assert blocked.status_code == 403
+        assert blocked.json()["error"] == "csrf_header_required"
+
+        # Mutating cookie request with X-Requested-With succeeds
+        refreshed = client.post("/auth/refresh", headers={"X-Requested-With": "fetch"})
+        assert refreshed.status_code == 200
+
+        # Logout revokes session and clears cookie
+        out = client.post("/auth/logout", headers={"X-Requested-With": "fetch"})
+        assert out.status_code == 200
+        assert "Max-Age=0" in out.headers.get("set-cookie", "")
+
+        after_out = client.get("/auth/me")
+        assert after_out.status_code == 401

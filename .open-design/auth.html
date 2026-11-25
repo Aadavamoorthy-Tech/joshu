@@ -568,6 +568,7 @@
     <script>
         let apiBase = window.location.origin;
         let sessionToken = null;
+        let isAuthenticated = false;
         let currentUser = null;
         let currentTaskId = null;
         let currentFilter = 'all';
@@ -577,6 +578,14 @@
         // Clear any legacy token previously saved in localStorage
         try { localStorage.removeItem('sessionToken'); } catch (_) {}
 
+        function buildAuthHeaders(extra = {}) {
+            const headers = { 'X-Requested-With': 'fetch', ...extra };
+            if (sessionToken) {
+                headers['Authorization'] = `Bearer ${sessionToken}`;
+            }
+            return headers;
+        }
+
         async function resolveApiBase() {
             const host = window.location.hostname;
             const isLocal = host === 'localhost' || host === '127.0.0.1';
@@ -585,13 +594,15 @@
                 return;
             }
             try {
-                const probe = await fetch(`${window.location.origin}/api/config`);
+                const probe = await fetch(`${window.location.origin}/api/config`, {
+                    credentials: 'include',
+                });
                 if (probe.ok) {
                     apiBase = window.location.origin;
                     return;
                 }
             } catch (_) {}
-            apiBase = 'http://localhost:8000';
+            apiBase = `http://${host}:8000`;
         }
 
         function showBanner(message, type = 'error') {
@@ -671,7 +682,8 @@
                 const redirectUri = `${window.location.origin}/auth.html`;
                 const response = await fetch(`${apiBase}/auth/signin`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({ redirect_uri: redirectUri })
                 });
 
@@ -699,12 +711,14 @@
             try {
                 const response = await fetch(`${apiBase}/api/auth/google/exchange`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
                     body: JSON.stringify({ exchange_code: exchangeCode })
                 });
                 const data = await parseJsonSafe(response);
                 if (response.ok && data.session_token) {
                     sessionToken = data.session_token;
+                    isAuthenticated = true;
                     currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
                     updateHeader();
                     showMainContent();
@@ -726,11 +740,15 @@
 
             try {
                 const callbackUrl = `${apiBase}/auth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
-                const response = await fetch(callbackUrl);
+                const response = await fetch(callbackUrl, {
+                    credentials: 'include',
+                    headers: buildAuthHeaders(),
+                });
                 const data = await parseJsonSafe(response);
 
                 if (response.ok && data.session_token) {
                     sessionToken = data.session_token;
+                    isAuthenticated = true;
                     currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
                     updateHeader();
                     showMainContent();
@@ -747,31 +765,43 @@
             }
         }
 
-        async function loadUserProfile() {
+        async function restoreSession() {
             try {
                 const response = await fetch(`${apiBase}/auth/me`, {
-                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                    credentials: 'include',
+                    headers: buildAuthHeaders(),
                 });
                 if (!response.ok) {
-                    logout();
-                    return;
+                    isAuthenticated = false;
+                    sessionToken = null;
+                    currentUser = null;
+                    showAuthContainer();
+                    return false;
                 }
                 const data = await parseJsonSafe(response);
+                isAuthenticated = true;
                 currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
                 updateHeader();
                 showMainContent();
-            } catch (error) {
-                showBanner('Failed to load profile: ' + error.message, 'error');
-                logout();
+                await loadTasks();
+                if (tasks.length === 0) {
+                    await syncInboxNow(true);
+                }
+                return true;
+            } catch (_) {
+                isAuthenticated = false;
+                showAuthContainer();
+                return false;
             }
         }
 
         async function loadTasks() {
-            if (!sessionToken) return;
+            if (!isAuthenticated) return;
             setSyncState(true, 'Loading...');
             try {
                 const response = await fetch(`${apiBase}/tasks?limit=100`, {
-                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                    credentials: 'include',
+                    headers: buildAuthHeaders(),
                 });
                 if (response.status === 401) {
                     logout();
@@ -789,7 +819,7 @@
         }
 
         async function syncInboxNow(silent = false) {
-            if (!sessionToken) return;
+            if (!isAuthenticated) return;
             if (!silent) hideBanner();
             const btn = document.getElementById('syncNowBtn');
             btn.disabled = true;
@@ -797,7 +827,8 @@
             try {
                 const response = await fetch(`${apiBase}/tasks/sync`, {
                     method: 'POST',
-                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                    credentials: 'include',
+                    headers: buildAuthHeaders(),
                 });
                 const data = await parseJsonSafe(response);
                 if (response.status === 401) {
@@ -813,13 +844,14 @@
                 }
                 await loadTasks();
                 const created = Number(data.created_tasks || 0);
+                const fetched = Number(data.fetched_messages ?? tasks.length);
                 if (!silent || created > 0) {
-                    showBanner(
-                        created > 0
-                            ? `Synced ${created} new item${created === 1 ? '' : 's'} from your inbox.`
-                            : `Inbox is up to date (${tasks.length} item${tasks.length === 1 ? '' : 's'} loaded).`,
-                        'info'
-                    );
+                    const summary = created > 0
+                        ? `Synced ${created} new item${created === 1 ? '' : 's'} from your inbox.`
+                        : fetched === 0 && tasks.length === 0
+                            ? 'Connected to Gmail, but this mailbox currently has no messages to import.'
+                            : `Inbox is up to date (${tasks.length} item${tasks.length === 1 ? '' : 's'} loaded).`;
+                    showBanner(summary, 'info');
                 }
             } catch (error) {
                 setSyncState(false, 'Sync error');
@@ -981,7 +1013,8 @@
             try {
                 const response = await fetch(`${apiBase}/tasks/${encodeURIComponent(taskId)}/approve`, {
                     method: 'POST',
-                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                    credentials: 'include',
+                    headers: buildAuthHeaders(),
                 });
                 if (!response.ok) {
                     const data = await parseJsonSafe(response);
@@ -998,7 +1031,8 @@
             try {
                 const response = await fetch(`${apiBase}/tasks/${encodeURIComponent(taskId)}/reject`, {
                     method: 'POST',
-                    headers: { 'Authorization': `Bearer ${sessionToken}` }
+                    credentials: 'include',
+                    headers: buildAuthHeaders(),
                 });
                 if (!response.ok) {
                     const data = await parseJsonSafe(response);
@@ -1107,17 +1141,20 @@
         }
 
         async function logout() {
-            const activeToken = sessionToken;
+            const headers = buildAuthHeaders();
+            const wasSignedIn = isAuthenticated || Boolean(sessionToken);
             sessionToken = null;
+            isAuthenticated = false;
             currentUser = null;
             tasks = [];
             try { localStorage.removeItem('sessionToken'); } catch (_) {}
 
-            if (activeToken) {
+            if (wasSignedIn) {
                 try {
                     await fetch(`${apiBase}/auth/logout`, {
                         method: 'POST',
-                        headers: { 'Authorization': `Bearer ${activeToken}` }
+                        credentials: 'include',
+                        headers,
                     });
                 } catch (_) {}
             }
@@ -1173,12 +1210,7 @@
                 return;
             }
 
-            if (sessionToken) {
-                await loadUserProfile();
-                await loadTasks();
-            } else {
-                showAuthContainer();
-            }
+            await restoreSession();
         }
 
         bootstrap();

@@ -308,6 +308,153 @@ class TestGoogleOAuthAndSessionIsolation(unittest.TestCase):
         # Account B remains unaffected
         self.assertIsNotNone(mgr.get_session(tok_b))
 
+    def test_gmail_api_falls_back_to_all_mail_when_inbox_empty(self) -> None:
+        from preview_server.google_oauth_service import fetch_gmail_api_inbox_messages
+
+        calls = []
+
+        def fake_http_json(url, method="GET", headers=None, form_data=None, timeout=12):
+            calls.append(url)
+            if "labelIds=INBOX" in url:
+                return 200, {"messages": []}
+            if "q=-in%3Atrash+-in%3Aspam" in url:
+                return 200, {"messages": [{"id": "gm-fallback-1"}]}
+            if "/messages/gm-fallback-1" in url:
+                raw_text = base64.urlsafe_b64encode(b"Archived welcome message").decode("ascii")
+                return 200, {
+                    "id": "gm-fallback-1",
+                    "threadId": "thr-fb-1",
+                    "snippet": "Archived welcome message",
+                    "payload": {
+                        "headers": [
+                            {"name": "Subject", "value": "Welcome to Gmail"},
+                            {"name": "From", "value": "team@google.com"},
+                            {"name": "Date", "value": "Tue, 24 Nov 2026 12:00:00 +0000"},
+                        ],
+                        "parts": [{"mimeType": "text/plain", "body": {"data": raw_text}}],
+                    },
+                }
+            return 404, {}
+
+        with patch("preview_server.google_oauth_service._http_json", side_effect=fake_http_json):
+            items = fetch_gmail_api_inbox_messages("fake-token", "user@gmail.com", max_messages=10)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["title"], "Welcome to Gmail")
+        self.assertTrue(any("labelIds=INBOX" in c for c in calls))
+        self.assertTrue(any("q=-in%3Atrash+-in%3Aspam" in c for c in calls))
+
+    def test_app_httponly_cookie_persists_session_and_enforces_csrf_header(self) -> None:
+        import http.client
+        import importlib.util
+        import json
+        import threading
+        from http.server import ThreadingHTTPServer
+        from pathlib import Path
+
+        root_app_path = Path(__file__).resolve().parent.parent / "app.py"
+        spec = importlib.util.spec_from_file_location("root_app_cookie_test", root_app_path)
+        assert spec is not None and spec.loader is not None
+        root_app = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(root_app)
+
+        def fake_imap_fetcher(email_address, password, imap_host, imap_port=993, max_messages=20):
+            return [
+                {
+                    "id": "task-cookie-1",
+                    "account_email": email_address,
+                    "external_message_id": "ext-cookie-1",
+                    "title": "Board Prep",
+                    "description": "Quarterly slides ready",
+                    "snippet": "Quarterly slides ready",
+                    "scheduled_for": "2026-11-26T10:00:00Z",
+                    "source": "email",
+                    "is_meeting_invite": False,
+                    "status": "pending",
+                    "organizer": "ops@company.com",
+                    "attendees": [email_address],
+                    "calendar_event_link": None,
+                    "raw_data": {},
+                    "created_at": "2026-11-24T10:00:00Z",
+                    "updated_at": "2026-11-24T10:00:00Z",
+                    "approved_at": None,
+                    "rejected_at": None,
+                    "rejection_reason": None,
+                    "approved_by_user": False,
+                }
+            ]
+
+        test_mgr = SessionManager(imap_fetcher=fake_imap_fetcher, enable_background_threads=False)
+        root_app.SESSION_MANAGER = test_mgr
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), root_app.JoshuHandler)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        try:
+            with patch("preview_server.session_store.validate_imap_target", return_value=("imap.gmail.com", 993)):
+                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                conn.request(
+                    "POST",
+                    "/api/auth/imap/signin",
+                    body=json.dumps({"email": "founder@gmail.com", "password": "app-password"}),
+                    headers={"Content-Type": "application/json"},
+                )
+                resp = conn.getresponse()
+                resp.read()
+                self.assertEqual(resp.status, 200)
+                set_cookie = resp.getheader("Set-Cookie") or ""
+                self.assertIn("joshu_session=", set_cookie)
+                self.assertIn("HttpOnly", set_cookie)
+                self.assertIn("SameSite=Lax", set_cookie)
+                cookie_pair = set_cookie.split(";", 1)[0]
+
+                # Simulate page refresh: GET /auth/me using ONLY the HttpOnly cookie
+                conn.request("GET", "/auth/me", headers={"Cookie": cookie_pair})
+                me_resp = conn.getresponse()
+                me_data = json.loads(me_resp.read().decode("utf-8"))
+                self.assertEqual(me_resp.status, 200)
+                self.assertEqual(me_data["user"]["email"], "founder@gmail.com")
+
+                # Cookie-authenticated POST without X-Requested-With must be blocked (403)
+                conn.request("POST", "/tasks/sync", headers={"Cookie": cookie_pair})
+                csrf_resp = conn.getresponse()
+                csrf_resp.read()
+                self.assertEqual(csrf_resp.status, 403)
+
+                # Cookie-authenticated POST with X-Requested-With succeeds (200)
+                conn.request(
+                    "POST",
+                    "/tasks/sync",
+                    headers={"Cookie": cookie_pair, "X-Requested-With": "fetch"},
+                )
+                sync_resp = conn.getresponse()
+                sync_resp.read()
+                self.assertEqual(sync_resp.status, 200)
+
+                # Logout clears cookie and revokes session
+                conn.request(
+                    "POST",
+                    "/auth/logout",
+                    headers={"Cookie": cookie_pair, "X-Requested-With": "fetch"},
+                )
+                logout_resp = conn.getresponse()
+                logout_resp.read()
+                self.assertEqual(logout_resp.status, 200)
+                cleared_cookie = logout_resp.getheader("Set-Cookie") or ""
+                self.assertIn("Max-Age=0", cleared_cookie)
+
+                # Subsequent /auth/me with old cookie is rejected
+                conn.request("GET", "/auth/me", headers={"Cookie": cookie_pair})
+                after_resp = conn.getresponse()
+                after_resp.read()
+                self.assertEqual(after_resp.status, 401)
+                conn.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,6 +37,7 @@ logger = logging.getLogger("joshu.gmail_poller")
 DEFAULT_POLL_INTERVAL_MINUTES = 15
 DEFAULT_MAX_MESSAGES_PER_POLL = 25
 DEFAULT_GMAIL_QUERY = "in:inbox"
+FALLBACK_GMAIL_QUERY = "-in:trash -in:spam"
 _URL_PATTERN = re.compile(r"https://[^\s<>\"')\]}]+", re.IGNORECASE)
 
 
@@ -275,7 +276,9 @@ class GmailPollingService:
         include_general_emails: Optional[bool] = None,
     ) -> None:
         self._gmail_service_factory = gmail_service_factory
-        self._query = query or os.getenv("GMAIL_POLL_QUERY", DEFAULT_GMAIL_QUERY)
+        env_query = (os.getenv("GMAIL_POLL_QUERY") or "").strip()
+        self._explicit_query = bool(query) or bool(env_query)
+        self._query = (query or env_query or DEFAULT_GMAIL_QUERY).strip()
         self._max_messages = max_messages or get_max_messages_per_poll()
         self._include_general_emails = (
             include_general_emails
@@ -284,7 +287,7 @@ class GmailPollingService:
         )
 
     def poll_user_inbox(self, db: DBSession, user_id: int) -> SyncResult:
-        """Fetch Gmail calendar invitations for a single user and insert any new tasks."""
+        """Fetch Gmail inbox emails and calendar invitations for a user and insert any new tasks."""
         token_record = (
             db.query(GoogleOAuthToken)
             .filter(GoogleOAuthToken.user_id == user_id)
@@ -296,15 +299,29 @@ class GmailPollingService:
             )
 
         creds = _build_google_credentials(token_record, db)
+        used_query = self._query
 
         try:
             gmail = self._gmail_service_factory(creds)
             list_response = (
                 gmail.users()
                 .messages()
-                .list(userId="me", q=self._query, maxResults=self._max_messages)
+                .list(userId="me", q=used_query, maxResults=self._max_messages)
                 .execute()
             )
+            message_stubs = list_response.get("messages") or []
+
+            # If default inbox query returns nothing (e.g., archived/All Mail messages only),
+            # fall back to recent non-spam/non-trash mail so real emails are still surfaced.
+            if not message_stubs and not self._explicit_query and used_query == DEFAULT_GMAIL_QUERY:
+                used_query = FALLBACK_GMAIL_QUERY
+                list_response = (
+                    gmail.users()
+                    .messages()
+                    .list(userId="me", q=used_query, maxResults=self._max_messages)
+                    .execute()
+                )
+                message_stubs = list_response.get("messages") or []
         except HttpError as exc:
             status_code = getattr(exc.resp, "status", None)
             if status_code == 401:
@@ -318,7 +335,7 @@ class GmailPollingService:
                 token_record.last_error = "Gmail API access denied (403)"
                 db.commit()
                 raise GmailScopeMissingError(
-                    "Gmail read access was denied. Please grant gmail.readonly permission."
+                    "Gmail API access was denied (403). Ensure the Gmail API is enabled in Google Cloud Console and gmail.readonly permission is granted."
                 ) from exc
             token_record.last_error = f"Gmail API HTTP error ({status_code})"
             db.commit()
@@ -328,7 +345,6 @@ class GmailPollingService:
             db.commit()
             raise GmailApiError("Network error while polling Gmail.") from exc
 
-        message_stubs = list_response.get("messages") or []
         fetched_count = len(message_stubs)
         created_count = 0
         skipped_duplicates = 0
@@ -426,6 +442,16 @@ class GmailPollingService:
         token_record.last_error = None
         token_record.updated_at = synced_at
         db.commit()
+
+        logger.info(
+            "Gmail poll finished user_id=%s query=%r fetched=%d created=%d skipped=%d ignored=%d",
+            user_id,
+            used_query,
+            fetched_count,
+            created_count,
+            skipped_duplicates,
+            ignored_non_invites,
+        )
 
         return SyncResult(
             user_id=user_id,

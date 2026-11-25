@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import json
 import os
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from preview_server.google_oauth_service import (
@@ -47,6 +48,11 @@ def _load_ui_html() -> str:
     return APP_HTML
 
 
+SESSION_COOKIE_NAME = "joshu_session"
+SESSION_COOKIE_MAX_AGE = 30 * 24 * 60 * 60
+_ALLOWED_CSRF_HEADERS = {"fetch", "xmlhttprequest"}
+
+
 def _session_user_dict(session: MailboxSession) -> Dict[str, Any]:
     return {
         "name": session.display_name,
@@ -55,9 +61,27 @@ def _session_user_dict(session: MailboxSession) -> Dict[str, Any]:
     }
 
 
+def _format_session_cookie(value: str, max_age: int, is_https: bool) -> str:
+    parts = [
+        f"{SESSION_COOKIE_NAME}={value}",
+        "Path=/",
+        f"Max-Age={max_age}",
+        "HttpOnly",
+    ]
+    if is_https:
+        parts.extend(["Secure", "SameSite=None", "Partitioned"])
+    else:
+        parts.append("SameSite=Lax")
+    return "; ".join(parts)
+
+
 class JoshuHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         return
+
+    def _is_https_request(self) -> bool:
+        proto = (self.headers.get("X-Forwarded-Proto") or "http").split(",")[0].strip().lower()
+        return proto == "https"
 
     def _request_origin(self) -> str:
         proto = (self.headers.get("X-Forwarded-Proto") or "http").split(",")[0].strip().lower()
@@ -73,11 +97,74 @@ class JoshuHandler(BaseHTTPRequestHandler):
             return parts[1].strip()
         return None
 
-    def _send_json(self, status: int, payload: Dict[str, Any]) -> None:
+    def _cookie_token(self) -> Optional[str]:
+        raw_cookie = self.headers.get("Cookie") or ""
+        if not raw_cookie:
+            return None
+        jar: SimpleCookie = SimpleCookie()
+        try:
+            jar.load(raw_cookie)
+        except Exception:
+            return None
+        morsel = jar.get(SESSION_COOKIE_NAME)
+        if morsel and morsel.value.strip():
+            return morsel.value.strip()
+        return None
+
+    def _resolve_auth_token(self, require_csrf: bool = False) -> Tuple[Optional[str], bool]:
+        """Return (token, csrf_failed) reading Bearer header first, then HttpOnly cookie."""
+        bearer = self._bearer_token()
+        if bearer:
+            return bearer, False
+
+        cookie_token = self._cookie_token()
+        if not cookie_token:
+            return None, False
+
+        if require_csrf:
+            requested_with = (self.headers.get("X-Requested-With") or "").strip().lower()
+            if requested_with not in _ALLOWED_CSRF_HEADERS:
+                return None, True
+
+        return cookie_token, False
+
+    def _session_cookie_headers(self, session_token: str) -> List[Tuple[str, str]]:
+        return [
+            (
+                "Set-Cookie",
+                _format_session_cookie(
+                    value=session_token,
+                    max_age=SESSION_COOKIE_MAX_AGE,
+                    is_https=self._is_https_request(),
+                ),
+            )
+        ]
+
+    def _clear_cookie_headers(self) -> List[Tuple[str, str]]:
+        return [
+            (
+                "Set-Cookie",
+                _format_session_cookie(
+                    value="",
+                    max_age=0,
+                    is_https=self._is_https_request(),
+                ),
+            )
+        ]
+
+    def _send_json(
+        self,
+        status: int,
+        payload: Dict[str, Any],
+        extra_headers: Optional[List[Tuple[str, str]]] = None,
+    ) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        if extra_headers:
+            for name, value in extra_headers:
+                self.send_header(name, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -103,7 +190,7 @@ class JoshuHandler(BaseHTTPRequestHandler):
             return {}
 
     def _handle_list_tasks(self, qs: Dict[str, Any]) -> None:
-        token = self._bearer_token()
+        token, _ = self._resolve_auth_token(require_csrf=False)
         if not token:
             self._send_json(401, {"error": "unauthorized", "message": "Sign in required."})
             return
@@ -120,7 +207,16 @@ class JoshuHandler(BaseHTTPRequestHandler):
         self._send_json(200, result)
 
     def _handle_sync_tasks(self) -> None:
-        token = self._bearer_token()
+        token, csrf_failed = self._resolve_auth_token(require_csrf=True)
+        if csrf_failed:
+            self._send_json(
+                403,
+                {
+                    "error": "csrf_header_required",
+                    "message": "Missing required X-Requested-With header.",
+                },
+            )
+            return
         if not token:
             self._send_json(401, {"error": "unauthorized", "message": "Sign in required."})
             return
@@ -143,7 +239,16 @@ class JoshuHandler(BaseHTTPRequestHandler):
             self._send_json(502, {"error": "poll_failed", "message": str(exc)})
 
     def _handle_decide_task(self, task_id: str, action: str) -> None:
-        token = self._bearer_token()
+        token, csrf_failed = self._resolve_auth_token(require_csrf=True)
+        if csrf_failed:
+            self._send_json(
+                403,
+                {
+                    "error": "csrf_header_required",
+                    "message": "Missing required X-Requested-With header.",
+                },
+            )
+            return
         if not token:
             self._send_json(401, {"error": "unauthorized", "message": "Sign in required."})
             return
@@ -248,6 +353,7 @@ class JoshuHandler(BaseHTTPRequestHandler):
                         "session": session.to_public_dict(),
                         "initial_synced": initial_synced,
                     },
+                    extra_headers=self._session_cookie_headers(session_token),
                 )
             except (ValueError, GoogleOAuthConfigError, GoogleOAuthError) as exc:
                 self._send_json(400, {"error": "oauth_callback_failed", "message": str(exc)})
@@ -295,7 +401,7 @@ class JoshuHandler(BaseHTTPRequestHandler):
             return
 
         if path in ("/api/auth/me", "/auth/me"):
-            token = self._bearer_token()
+            token, _ = self._resolve_auth_token(require_csrf=False)
             session = SESSION_MANAGER.get_session(token)
             if session is None:
                 self._send_json(401, {"error": "unauthorized", "message": "Sign in required."})
@@ -372,6 +478,7 @@ class JoshuHandler(BaseHTTPRequestHandler):
                     "session": session.to_public_dict(),
                     "initial_synced": initial_synced,
                 },
+                extra_headers=self._session_cookie_headers(session_token),
             )
             return
 
@@ -393,6 +500,7 @@ class JoshuHandler(BaseHTTPRequestHandler):
                         "session": session.to_public_dict(),
                         "initial_synced": initial_synced,
                     },
+                    extra_headers=self._session_cookie_headers(token),
                 )
             except ImapValidationError as exc:
                 self._send_json(400, {"error": "validation_error", "message": str(exc)})
@@ -403,9 +511,22 @@ class JoshuHandler(BaseHTTPRequestHandler):
             return
 
         if path in ("/api/auth/signout", "/auth/logout"):
-            token = self._bearer_token()
+            token, csrf_failed = self._resolve_auth_token(require_csrf=True)
+            if csrf_failed:
+                self._send_json(
+                    403,
+                    {
+                        "error": "csrf_header_required",
+                        "message": "Missing required X-Requested-With header.",
+                    },
+                )
+                return
             SESSION_MANAGER.sign_out(token)
-            self._send_json(200, {"message": "Signed out successfully."})
+            self._send_json(
+                200,
+                {"message": "Signed out successfully."},
+                extra_headers=self._clear_cookie_headers(),
+            )
             return
 
         if path in ("/api/tasks/sync", "/tasks/sync"):
@@ -426,7 +547,16 @@ class JoshuHandler(BaseHTTPRequestHandler):
     def do_PATCH(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/polling/config":
-            token = self._bearer_token()
+            token, csrf_failed = self._resolve_auth_token(require_csrf=True)
+            if csrf_failed:
+                self._send_json(
+                    403,
+                    {
+                        "error": "csrf_header_required",
+                        "message": "Missing required X-Requested-With header.",
+                    },
+                )
+                return
             if not token:
                 self._send_json(401, {"error": "unauthorized", "message": "Sign in required."})
                 return

@@ -1,15 +1,19 @@
-"""Reusable Bearer session token validation middleware and FastAPI dependencies."""
+"""Reusable Bearer and HttpOnly cookie session validation middleware and FastAPI dependencies."""
 
 from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request, Response
 from sqlalchemy.orm import Session as DBSession
 
 from app.database import get_db
 from app.models.session import Session as UserSession
 from app.models.session import utc_now
+
+SESSION_COOKIE_NAME = "joshu_session"
+_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+_ALLOWED_CSRF_HEADERS = {"fetch", "xmlhttprequest"}
 
 
 def auth_error(status_code: int, error: str, message: str) -> HTTPException:
@@ -22,6 +26,65 @@ def auth_error(status_code: int, error: str, message: str) -> HTTPException:
             "status": status_code,
         },
     )
+
+
+def _is_https_request(request: Request) -> bool:
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if forwarded in ("http", "https"):
+        return forwarded == "https"
+    return request.url.scheme == "https"
+
+
+def _format_cookie_header(value: str, max_age: int, is_https: bool) -> str:
+    parts = [
+        f"{SESSION_COOKIE_NAME}={value}",
+        "Path=/",
+        f"Max-Age={max_age}",
+        "HttpOnly",
+    ]
+    if is_https:
+        parts.extend(["Secure", "SameSite=None", "Partitioned"])
+    else:
+        parts.append("SameSite=Lax")
+    return "; ".join(parts)
+
+
+def set_session_cookie(
+    response: Response,
+    request: Request,
+    session_id: str,
+    max_age_seconds: int,
+) -> None:
+    """Emit an HttpOnly session cookie compatible with both localhost HTTP and HTTPS iframes."""
+    header_value = _format_cookie_header(
+        value=session_id,
+        max_age=max(0, int(max_age_seconds)),
+        is_https=_is_https_request(request),
+    )
+    response.headers.append("set-cookie", header_value)
+
+
+def clear_session_cookie(response: Response, request: Request) -> None:
+    """Clear the HttpOnly session cookie using matching security attributes."""
+    header_value = _format_cookie_header(
+        value="",
+        max_age=0,
+        is_https=_is_https_request(request),
+    )
+    response.headers.append("set-cookie", header_value)
+
+
+def verify_cookie_csrf(request: Request) -> None:
+    """Require a non-simple X-Requested-With header on cookie-authenticated mutations."""
+    if request.method.upper() not in _MUTATING_METHODS:
+        return
+    requested_with = (request.headers.get("x-requested-with") or "").strip().lower()
+    if requested_with not in _ALLOWED_CSRF_HEADERS:
+        raise auth_error(
+            403,
+            "csrf_header_required",
+            "Missing required X-Requested-With header for cookie-authenticated request",
+        )
 
 
 def extract_bearer_token(authorization: Optional[str]) -> str:
@@ -40,15 +103,23 @@ def extract_bearer_token(authorization: Optional[str]) -> str:
     return parts[1].strip()
 
 
-async def validate_session(authorization: Optional[str], db: DBSession) -> UserSession:
-    """
-    Validate an opaque Bearer session token against the database.
+def resolve_session_token(
+    request: Request,
+    authorization: Optional[str],
+) -> tuple[str, bool]:
+    """Extract session token from Authorization Bearer header or HttpOnly cookie."""
+    if authorization:
+        return extract_bearer_token(authorization), False
 
-    Raises HTTPException(401) if the token is missing, malformed, inactive,
-    unknown, or expired.
-    """
-    token = extract_bearer_token(authorization)
+    cookie_token = (request.cookies.get(SESSION_COOKIE_NAME) or "").strip()
+    if cookie_token:
+        return cookie_token, True
 
+    raise auth_error(401, "missing_authorization", "Authorization header or session cookie is required")
+
+
+async def validate_session_token(token: str, db: DBSession) -> UserSession:
+    """Validate an opaque session token string against the database."""
     session_record = (
         db.query(UserSession)
         .filter(UserSession.id == token, UserSession.is_active.is_(True))
@@ -66,9 +137,24 @@ async def validate_session(authorization: Optional[str], db: DBSession) -> UserS
     return session_record
 
 
+async def validate_session(authorization: Optional[str], db: DBSession) -> UserSession:
+    """
+    Validate an opaque Bearer session token against the database.
+
+    Raises HTTPException(401) if the token is missing, malformed, inactive,
+    unknown, or expired.
+    """
+    token = extract_bearer_token(authorization)
+    return await validate_session_token(token=token, db=db)
+
+
 async def get_current_session(
+    request: Request,
     authorization: Optional[str] = Header(default=None),
     db: DBSession = Depends(get_db),
 ) -> UserSession:
     """FastAPI dependency injecting the validated active Session record."""
-    return await validate_session(authorization=authorization, db=db)
+    token, via_cookie = resolve_session_token(request=request, authorization=authorization)
+    if via_cookie:
+        verify_cookie_csrf(request)
+    return await validate_session_token(token=token, db=db)
