@@ -12,8 +12,6 @@ from app.models.session import Session as UserSession
 from app.models.session import utc_now
 
 SESSION_COOKIE_NAME = "joshu_session"
-PROFILES_COOKIE_NAME = "joshu_profiles"
-_MAX_PROFILES_COOKIE_SESSIONS = 6
 _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 _ALLOWED_CSRF_HEADERS = {"fetch", "xmlhttprequest"}
 
@@ -37,9 +35,9 @@ def _is_https_request(request: Request) -> bool:
     return request.url.scheme == "https"
 
 
-def _format_named_cookie_header(name: str, value: str, max_age: int, is_https: bool) -> str:
+def _format_cookie_header(value: str, max_age: int, is_https: bool) -> str:
     parts = [
-        f"{name}={value}",
+        f"{SESSION_COOKIE_NAME}={value}",
         "Path=/",
         f"Max-Age={max_age}",
         "HttpOnly",
@@ -51,96 +49,29 @@ def _format_named_cookie_header(name: str, value: str, max_age: int, is_https: b
     return "; ".join(parts)
 
 
-def _format_cookie_header(value: str, max_age: int, is_https: bool) -> str:
-    return _format_named_cookie_header(
-        name=SESSION_COOKIE_NAME,
-        value=value,
-        max_age=max_age,
-        is_https=is_https,
-    )
-
-
-def get_profile_session_ids(
-    request: Request,
-    include_session_id: Optional[str] = None,
-    exclude_session_id: Optional[str] = None,
-) -> list[str]:
-    """Return deduplicated session IDs stored in the browser's multi-profile cookies."""
-    ordered: list[str] = []
-    if include_session_id and include_session_id.strip():
-        ordered.append(include_session_id.strip())
-
-    active_cookie = (request.cookies.get(SESSION_COOKIE_NAME) or "").strip()
-    if active_cookie and active_cookie not in ordered:
-        ordered.append(active_cookie)
-
-    raw_profiles = (request.cookies.get(PROFILES_COOKIE_NAME) or "").strip()
-    if raw_profiles:
-        for part in raw_profiles.split(","):
-            token = part.strip()
-            if token and token not in ordered:
-                ordered.append(token)
-
-    if exclude_session_id:
-        excluded = exclude_session_id.strip()
-        ordered = [tok for tok in ordered if tok != excluded]
-
-    return ordered[:_MAX_PROFILES_COOKIE_SESSIONS]
-
-
 def set_session_cookie(
     response: Response,
     request: Request,
     session_id: str,
     max_age_seconds: int,
 ) -> None:
-    """Emit HttpOnly session and multi-profile cookies compatible with localhost HTTP and HTTPS iframes."""
-    is_https = _is_https_request(request)
-    clamped_age = max(0, int(max_age_seconds))
+    """Emit an HttpOnly session cookie compatible with both localhost HTTP and HTTPS iframes."""
     header_value = _format_cookie_header(
         value=session_id,
-        max_age=clamped_age,
-        is_https=is_https,
+        max_age=max(0, int(max_age_seconds)),
+        is_https=_is_https_request(request),
     )
     response.headers.append("set-cookie", header_value)
 
-    profile_ids = get_profile_session_ids(request=request, include_session_id=session_id)
-    if profile_ids:
-        profiles_header = _format_named_cookie_header(
-            name=PROFILES_COOKIE_NAME,
-            value=",".join(profile_ids),
-            max_age=clamped_age,
-            is_https=is_https,
-        )
-        response.headers.append("set-cookie", profiles_header)
 
-
-def clear_session_cookie(
-    response: Response,
-    request: Request,
-    removed_session_id: Optional[str] = None,
-) -> None:
-    """Clear the active HttpOnly session cookie and remove the revoked session from joshu_profiles."""
-    is_https = _is_https_request(request)
+def clear_session_cookie(response: Response, request: Request) -> None:
+    """Clear the HttpOnly session cookie using matching security attributes."""
     header_value = _format_cookie_header(
         value="",
         max_age=0,
-        is_https=is_https,
+        is_https=_is_https_request(request),
     )
     response.headers.append("set-cookie", header_value)
-
-    if removed_session_id:
-        remaining = get_profile_session_ids(
-            request=request,
-            exclude_session_id=removed_session_id,
-        )
-        profiles_header = _format_named_cookie_header(
-            name=PROFILES_COOKIE_NAME,
-            value=",".join(remaining),
-            max_age=30 * 86400 if remaining else 0,
-            is_https=is_https,
-        )
-        response.headers.append("set-cookie", profiles_header)
 
 
 def verify_cookie_csrf(request: Request) -> None:
