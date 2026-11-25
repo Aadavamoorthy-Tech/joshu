@@ -708,7 +708,6 @@
                 <span id="syncLabel">Synced</span>
             </div>
             <button id="syncNowBtn" class="btn btn-secondary" style="display: none;">Sync Inbox</button>
-            <button id="analyzeAllBtn" class="btn btn-primary" style="display: none;">Analyze Emails</button>
             <div id="userInfo" class="user-info" style="display: none;">
                 <div class="avatar" id="userAvatar">J</div>
                 <div>
@@ -928,7 +927,6 @@
             document.getElementById('reconnectGoogleBtn').addEventListener('click', startSignIn);
             document.getElementById('logoutBtn').addEventListener('click', logout);
             document.getElementById('syncNowBtn').addEventListener('click', () => syncInboxNow(false));
-            document.getElementById('analyzeAllBtn').addEventListener('click', analyzePendingEmails);
             document.getElementById('statusBannerClose').addEventListener('click', hideBanner);
             document.getElementById('closeModalBtn').addEventListener('click', closeModal);
             document.getElementById('reanalyzeBtnModal').addEventListener('click', reanalyzeCurrentTask);
@@ -1177,40 +1175,6 @@
             }
         }
 
-        async function analyzePendingEmails() {
-            if (!isAuthenticated) return;
-            hideBanner();
-            const btn = document.getElementById('analyzeAllBtn');
-            btn.disabled = true;
-            setSyncState(true, 'Analyzing...');
-            try {
-                const response = await fetch(`${apiBase}/tasks/analyze-pending`, {
-                    method: 'POST',
-                    credentials: 'include',
-                    headers: buildAuthHeaders(),
-                });
-                const data = await parseJsonSafe(response);
-                if (!response.ok) {
-                    showBanner(data.message || 'Could not analyze emails right now.', 'error');
-                    setSyncState(false, 'Synced');
-                    return;
-                }
-                await loadTasks();
-                const count = Number(data.analyzed || 0);
-                showBanner(
-                    count > 0
-                        ? `AI analyzed ${count} email${count === 1 ? '' : 's'} and prepared action recommendations.`
-                        : 'All pending emails are already analyzed.',
-                    'success'
-                );
-            } catch (error) {
-                showBanner('AI analysis failed: ' + error.message, 'error');
-                setSyncState(false, 'Synced');
-            } finally {
-                btn.disabled = false;
-            }
-        }
-
         async function analyzeSingleTask(taskId) {
             if (!isAuthenticated) return null;
             setSyncState(true, 'Analyzing...');
@@ -1251,7 +1215,6 @@
                 const email = String(currentUser.email || '');
                 document.getElementById('userInfo').style.display = 'flex';
                 document.getElementById('syncNowBtn').style.display = 'inline-block';
-                document.getElementById('analyzeAllBtn').style.display = 'inline-block';
                 document.getElementById('signInBtn').style.display = 'none';
                 document.getElementById('logoutBtn').style.display = 'inline-block';
                 document.getElementById('userName').textContent = displayName;
@@ -2032,7 +1995,6 @@
             document.getElementById('userInfo').style.display = 'none';
             document.getElementById('syncStatus').style.display = 'none';
             document.getElementById('syncNowBtn').style.display = 'none';
-            document.getElementById('analyzeAllBtn').style.display = 'none';
             document.getElementById('signInBtn').style.display = 'inline-block';
             document.getElementById('logoutBtn').style.display = 'none';
             document.getElementById('capabilityBar').classList.remove('visible');
