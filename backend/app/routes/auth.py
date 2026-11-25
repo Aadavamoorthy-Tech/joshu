@@ -20,9 +20,11 @@ from sqlalchemy.orm import Session as DBSession
 from app.core.encryption import encrypt_secret
 from app.database import get_db
 from app.middleware.auth import (
+    PROFILES_COOKIE_NAME,
     auth_error,
     clear_session_cookie,
     get_current_session,
+    get_profile_session_ids,
     resolve_session_token,
     set_session_cookie,
     verify_cookie_csrf,
@@ -62,6 +64,63 @@ class SignInRequest(BaseModel):
 
     redirect_uri: Optional[str] = None
     force_consent: bool = False
+
+
+class SwitchProfileRequest(BaseModel):
+    """Request payload for switching between active profiles authenticated in this browser."""
+
+    session_id: str
+
+
+def _list_browser_profiles(
+    request: Request,
+    current_session: UserSession,
+    db: DBSession,
+) -> List[Dict[str, Any]]:
+    """Return deduplicated active profiles authenticated in the caller's browser cookies."""
+    candidate_ids = get_profile_session_ids(
+        request=request,
+        include_session_id=current_session.id,
+    )
+    if not candidate_ids:
+        candidate_ids = [current_session.id]
+
+    now = utc_now()
+    active_sessions = (
+        db.query(UserSession)
+        .filter(
+            UserSession.id.in_(candidate_ids),
+            UserSession.is_active.is_(True),
+            UserSession.expires_at > now,
+        )
+        .all()
+    )
+    by_id = {s.id: s for s in active_sessions}
+
+    profiles: List[Dict[str, Any]] = []
+    seen_user_ids: set[int] = set()
+
+    # Always place the current active session first, followed by other browser profiles in cookie order.
+    ordered_ids = [current_session.id] + [sid for sid in candidate_ids if sid != current_session.id]
+    for sid in ordered_ids:
+        sess = by_id.get(sid)
+        if sess is None or sess.user is None:
+            continue
+        if sess.user_id in seen_user_ids:
+            continue
+        seen_user_ids.add(sess.user_id)
+        u = sess.user
+        profiles.append(
+            {
+                "session_id": sess.id,
+                "email": u.email,
+                "name": u.name,
+                "picture_url": u.picture_url,
+                "is_current": sess.user_id == current_session.user_id,
+            }
+        )
+
+    return profiles
 
 
 def _get_oauth_settings() -> tuple[str, str, str, int]:
@@ -458,6 +517,7 @@ def auth_callback(
             "picture_url": user.picture_url,
         },
         "expires_at": _format_iso_utc(expires_at),
+        "profiles": _list_browser_profiles(request, new_session, db),
     }
 
 
@@ -529,7 +589,7 @@ def auth_logout(
     session_record = db.query(UserSession).filter(UserSession.id == token).first()
 
     if session_record is None:
-        clear_session_cookie(response=response, request=request)
+        clear_session_cookie(response=response, request=request, removed_session_id=token)
         if via_cookie:
             return {"message": "Logged out successfully"}
         raise auth_error(404, "session_not_found", "Session not found")
@@ -538,7 +598,7 @@ def auth_logout(
         if session_record.is_active:
             session_record.is_active = False
             db.commit()
-        clear_session_cookie(response=response, request=request)
+        clear_session_cookie(response=response, request=request, removed_session_id=token)
         if via_cookie:
             return {"message": "Logged out successfully"}
         raise auth_error(401, "invalid_session", "Session token is invalid or expired")
@@ -554,15 +614,28 @@ def auth_logout(
             "Failed to revoke user session",
         ) from exc
 
-    clear_session_cookie(response=response, request=request)
+    clear_session_cookie(response=response, request=request, removed_session_id=token)
     return {"message": "Logged out successfully"}
 
 
 @router.get("/me")
 def auth_me(
+    request: Request,
+    response: Response,
     current_session: UserSession = Depends(get_current_session),
+    db: DBSession = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Return the authenticated user's profile, session expiry, and capability flags."""
+    """Return the authenticated user's profile, session expiry, capability flags, and browser profiles."""
+    raw_profiles_cookie = (request.cookies.get(PROFILES_COOKIE_NAME) or "").strip()
+    if current_session.id not in [p.strip() for p in raw_profiles_cookie.split(",") if p.strip()]:
+        expiry_days = int(os.getenv("SESSION_TOKEN_EXPIRY_DAYS", "30"))
+        set_session_cookie(
+            response=response,
+            request=request,
+            session_id=current_session.id,
+            max_age_seconds=expiry_days * 86400,
+        )
+
     user = current_session.user
     token_record = user.google_token
     return {
@@ -582,4 +655,78 @@ def auth_me(
             "payment_configured": is_payment_gateway_configured(),
             "processed_folder": get_processed_folder_name(),
         },
+        "profiles": _list_browser_profiles(request, current_session, db),
+    }
+
+
+@router.post("/switch-profile")
+def switch_profile(
+    payload: SwitchProfileRequest,
+    request: Request,
+    response: Response,
+    current_session: UserSession = Depends(get_current_session),
+    db: DBSession = Depends(get_db),
+) -> Dict[str, Any]:
+    """Switch the active session to another authenticated profile in this browser's joshu_profiles cookie."""
+    target_id = (payload.session_id or "").strip()
+    if not target_id:
+        raise auth_error(400, "missing_session_id", "Target profile session_id is required")
+
+    allowed_ids = get_profile_session_ids(
+        request=request,
+        include_session_id=current_session.id,
+    )
+    if target_id not in allowed_ids:
+        raise auth_error(
+            403,
+            "profile_not_authorized",
+            "Target profile is not authenticated in this browser session",
+        )
+
+    now = utc_now()
+    target_session = (
+        db.query(UserSession)
+        .filter(
+            UserSession.id == target_id,
+            UserSession.is_active.is_(True),
+            UserSession.expires_at > now,
+        )
+        .first()
+    )
+    if target_session is None or target_session.user is None:
+        raise auth_error(
+            401,
+            "profile_session_expired",
+            "That profile's session has expired. Please sign in to that account again.",
+        )
+
+    expiry_days = int(os.getenv("SESSION_TOKEN_EXPIRY_DAYS", "30"))
+    set_session_cookie(
+        response=response,
+        request=request,
+        session_id=target_session.id,
+        max_age_seconds=expiry_days * 86400,
+    )
+
+    user = target_session.user
+    token_record = user.google_token
+    return {
+        "session_token": target_session.id,
+        "user": {
+            "email": user.email,
+            "name": user.name,
+            "picture_url": user.picture_url,
+        },
+        "expires_at": _format_iso_utc(target_session.expires_at),
+        "granted_scopes": token_record.scope_list() if token_record else ["openid", "email", "profile"],
+        "google_reconnect_required": bool(token_record.needs_reconnect) if token_record else False,
+        "capabilities": {
+            "gmail_modify": token_record.has_gmail_modify() if token_record else False,
+            "gmail_send": token_record.has_gmail_send() if token_record else False,
+            "calendar_events": token_record.has_calendar_events() if token_record else False,
+            "ai_configured": is_ai_configured(),
+            "payment_configured": is_payment_gateway_configured(),
+            "processed_folder": get_processed_folder_name(),
+        },
+        "profiles": _list_browser_profiles(request, target_session, db),
     }

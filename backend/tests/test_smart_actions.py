@@ -298,6 +298,26 @@ class SmartChiefOfStaffUnitTests(unittest.TestCase):
         self.assertEqual(call_kwargs["data"]["confirm"], "true")
         self.assertEqual(call_kwargs["data"]["off_session"], "true")
 
+    def test_instant_analysis_does_not_truncate_email_domain_as_upi_id(self) -> None:
+        from app.services.email_analyzer import build_instant_analysis
+
+        analysis = build_instant_analysis(
+            subject="Project update",
+            sender="aadavamoorthy@gmail.com",
+            body="Please review the attached notes from aadavamoorthy@gmail.com.",
+        )
+        self.assertEqual(analysis["payment"]["payee_upi_id"], "")
+
+        upi_analysis = build_instant_analysis(
+            subject="Invoice INV-884 for Cloud Hosting",
+            sender="Billing <billing@vendor.in>",
+            body="Please remit ₹4,200.00 via UPI to vendor.pay@okaxis before Friday.",
+        )
+        self.assertTrue(upi_analysis["requires_payment"])
+        self.assertEqual(upi_analysis["payment"]["amount"], 4200.0)
+        self.assertEqual(upi_analysis["payment"]["payee_upi_id"], "vendor.pay@okaxis")
+
 
 if __name__ == "__main__":
     unittest.main()
+

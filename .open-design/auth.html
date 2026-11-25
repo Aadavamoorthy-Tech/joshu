@@ -67,10 +67,177 @@
             flex-wrap: wrap;
         }
 
+        .profile-switcher {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }
+
         .user-info {
             display: flex;
             align-items: center;
             gap: var(--spacing-sm);
+            padding: 6px 10px;
+            border-radius: var(--radius-md);
+            border: 1px solid transparent;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.18s ease, border-color 0.18s ease;
+        }
+
+        .user-info:hover,
+        .user-info.menu-open {
+            background: rgba(74, 158, 255, 0.1);
+            border-color: var(--border-color);
+        }
+
+        .user-info:focus-visible {
+            outline: 2px solid var(--accent-primary);
+            outline-offset: 2px;
+        }
+
+        .profile-chevron {
+            color: var(--text-secondary);
+            font-size: 11px;
+            margin-left: 2px;
+            transition: transform 0.18s ease, color 0.18s ease;
+        }
+
+        .user-info:hover .profile-chevron,
+        .user-info.menu-open .profile-chevron {
+            color: var(--text-primary);
+        }
+
+        .user-info.menu-open .profile-chevron {
+            transform: rotate(180deg);
+        }
+
+        .profile-menu {
+            display: none;
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            width: 310px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
+            padding: 8px;
+            z-index: 1100;
+        }
+
+        .profile-menu.open {
+            display: block;
+        }
+
+        .profile-menu-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-secondary);
+            padding: 6px 10px 4px;
+        }
+
+        .profile-menu-list {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .profile-menu-item {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border-radius: var(--radius-md);
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--text-primary);
+            text-align: left;
+            font-family: inherit;
+            cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease;
+        }
+
+        .profile-menu-item:hover:not(:disabled) {
+            background: var(--bg-tertiary);
+            border-color: var(--border-color);
+        }
+
+        .profile-menu-item.current {
+            background: rgba(74, 158, 255, 0.1);
+            border-color: rgba(74, 158, 255, 0.3);
+            cursor: default;
+        }
+
+        .profile-menu-item:disabled {
+            opacity: 0.6;
+            cursor: wait;
+        }
+
+        .profile-menu-meta {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .profile-menu-name {
+            font-size: 13.5px;
+            font-weight: 600;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .profile-menu-email {
+            font-size: 12px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .profile-menu-badge {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            flex-shrink: 0;
+        }
+
+        .profile-menu-badge.active {
+            background: rgba(52, 168, 83, 0.18);
+            color: #6ee7b7;
+        }
+
+        .profile-menu-badge.switch {
+            background: rgba(74, 158, 255, 0.16);
+            color: var(--accent-primary);
+        }
+
+        .profile-menu-divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 6px 4px;
+        }
+
+        .profile-menu-action-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--accent-primary);
+            flex-shrink: 0;
         }
 
         .avatar {
@@ -84,10 +251,12 @@
             font-weight: 600;
             font-size: 14px;
             color: white;
+            flex-shrink: 0;
         }
 
         .user-details {
             font-size: 14px;
+            font-weight: 500;
         }
 
         .user-email {
@@ -817,12 +986,16 @@
                 <span id="syncLabel">Synced</span>
             </div>
             <button id="syncNowBtn" class="btn btn-secondary" style="display: none;">Sync Inbox</button>
-            <div id="userInfo" class="user-info" style="display: none;">
-                <div class="avatar" id="userAvatar">J</div>
-                <div>
-                    <div id="userName" class="user-details"></div>
-                    <div id="userEmail" class="user-email"></div>
+            <div class="profile-switcher" id="profileSwitcher">
+                <div id="userInfo" class="user-info" style="display: none;" role="button" tabindex="0" aria-haspopup="true" aria-expanded="false" title="Switch Google profile">
+                    <div class="avatar" id="userAvatar">J</div>
+                    <div>
+                        <div id="userName" class="user-details"></div>
+                        <div id="userEmail" class="user-email"></div>
+                    </div>
+                    <span class="profile-chevron" aria-hidden="true">▾</span>
                 </div>
+                <div id="profileMenu" class="profile-menu" role="menu" aria-label="Switch Google profile"></div>
             </div>
             <button id="logoutBtn" class="btn btn-secondary" style="display: none;">Logout</button>
         </div>
@@ -909,6 +1082,7 @@
         let sessionToken = null;
         let isAuthenticated = false;
         let currentUser = null;
+        let availableProfiles = [];
         let capabilities = null;
         let currentTaskId = null;
         let currentFilter = 'all';
@@ -1042,6 +1216,34 @@
             document.getElementById('approveBtnModal').addEventListener('click', approveCurrentTaskFromModal);
             document.getElementById('rejectBtnModal').addEventListener('click', rejectCurrentTask);
 
+            const userInfoEl = document.getElementById('userInfo');
+            userInfoEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleProfileMenu();
+            });
+            userInfoEl.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleProfileMenu();
+                } else if (e.key === 'Escape') {
+                    closeProfileMenu();
+                }
+            });
+
+            document.addEventListener('click', (e) => {
+                const switcher = document.getElementById('profileSwitcher');
+                if (switcher && !switcher.contains(e.target)) {
+                    closeProfileMenu();
+                }
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    closeProfileMenu();
+                }
+            });
+
             document.getElementById('taskModal').addEventListener('click', (e) => {
                 if (e.target === e.currentTarget) closeModal();
             });
@@ -1156,6 +1358,9 @@
                     sessionToken = data.session_token;
                     isAuthenticated = true;
                     currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
+                    if (Array.isArray(data.profiles)) {
+                        availableProfiles = data.profiles;
+                    }
                     updateHeader();
                     showMainContent();
                     startAutoRefresh();
@@ -1201,6 +1406,9 @@
                 if (res.ok) {
                     const data = await parseJsonSafe(res);
                     capabilities = data.capabilities || null;
+                    if (Array.isArray(data.profiles)) {
+                        availableProfiles = data.profiles;
+                    }
                     updateCapabilityBanner();
                 }
             } catch (_) {}
@@ -1216,6 +1424,7 @@
                     isAuthenticated = false;
                     sessionToken = null;
                     currentUser = null;
+                    availableProfiles = [];
                     capabilities = null;
                     stopAutoRefresh();
                     updateCapabilityBanner();
@@ -1225,6 +1434,7 @@
                 const data = await parseJsonSafe(response);
                 isAuthenticated = true;
                 currentUser = data.user || (data.session ? { name: data.session.display_name, email: data.session.email } : null);
+                availableProfiles = Array.isArray(data.profiles) ? data.profiles : [];
                 capabilities = data.capabilities || null;
                 updateHeader();
                 showMainContent();
@@ -1323,6 +1533,16 @@
             };
         }
 
+        function getInitials(displayName) {
+            return String(displayName || 'User')
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((n) => n[0])
+                .join('')
+                .toUpperCase() || 'J';
+        }
+
         function updateHeader() {
             if (currentUser) {
                 const displayName = String(currentUser.name || currentUser.email || 'User');
@@ -1332,14 +1552,194 @@
                 document.getElementById('logoutBtn').style.display = 'inline-block';
                 document.getElementById('userName').textContent = displayName;
                 document.getElementById('userEmail').textContent = email;
-                const initials = displayName
-                    .split(/\s+/)
-                    .filter(Boolean)
-                    .slice(0, 2)
-                    .map((n) => n[0])
-                    .join('')
-                    .toUpperCase() || 'J';
-                document.getElementById('userAvatar').textContent = initials;
+                document.getElementById('userAvatar').textContent = getInitials(displayName);
+                renderProfileMenu();
+            }
+        }
+
+        function closeProfileMenu() {
+            const menu = document.getElementById('profileMenu');
+            const userInfoEl = document.getElementById('userInfo');
+            if (menu) menu.classList.remove('open');
+            if (userInfoEl) {
+                userInfoEl.classList.remove('menu-open');
+                userInfoEl.setAttribute('aria-expanded', 'false');
+            }
+        }
+
+        function toggleProfileMenu() {
+            const menu = document.getElementById('profileMenu');
+            const userInfoEl = document.getElementById('userInfo');
+            if (!menu || !userInfoEl) return;
+            const willOpen = !menu.classList.contains('open');
+            if (!willOpen) {
+                closeProfileMenu();
+                return;
+            }
+            renderProfileMenu();
+            menu.classList.add('open');
+            userInfoEl.classList.add('menu-open');
+            userInfoEl.setAttribute('aria-expanded', 'true');
+        }
+
+        function renderProfileMenu() {
+            const menu = document.getElementById('profileMenu');
+            if (!menu) return;
+            menu.replaceChildren();
+
+            const sectionLabel = document.createElement('div');
+            sectionLabel.className = 'profile-menu-label';
+            sectionLabel.textContent = 'Google Profiles';
+            menu.appendChild(sectionLabel);
+
+            const listEl = document.createElement('div');
+            listEl.className = 'profile-menu-list';
+
+            const profilesToRender = Array.isArray(availableProfiles) && availableProfiles.length > 0
+                ? availableProfiles
+                : (currentUser ? [{
+                    session_id: sessionToken || '',
+                    name: currentUser.name,
+                    email: currentUser.email,
+                    is_current: true,
+                }] : []);
+
+            profilesToRender.forEach((prof) => {
+                const isCurrent = Boolean(prof.is_current) || (currentUser && prof.email === currentUser.email);
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `profile-menu-item${isCurrent ? ' current' : ''}`;
+                btn.setAttribute('role', 'menuitem');
+
+                const avatar = document.createElement('div');
+                avatar.className = 'avatar';
+                avatar.textContent = getInitials(prof.name || prof.email);
+
+                const meta = document.createElement('div');
+                meta.className = 'profile-menu-meta';
+
+                const nameEl = document.createElement('div');
+                nameEl.className = 'profile-menu-name';
+                nameEl.textContent = String(prof.name || prof.email || 'User');
+
+                const emailEl = document.createElement('div');
+                emailEl.className = 'profile-menu-email';
+                emailEl.textContent = String(prof.email || '');
+
+                meta.append(nameEl, emailEl);
+
+                const badge = document.createElement('span');
+                badge.className = `profile-menu-badge ${isCurrent ? 'active' : 'switch'}`;
+                badge.textContent = isCurrent ? 'Active' : 'Switch';
+
+                btn.append(avatar, meta, badge);
+
+                if (!isCurrent && prof.session_id) {
+                    btn.addEventListener('click', () => switchProfileTo(prof.session_id, btn, badge));
+                }
+                listEl.appendChild(btn);
+            });
+
+            menu.appendChild(listEl);
+
+            const divider = document.createElement('div');
+            divider.className = 'profile-menu-divider';
+            menu.appendChild(divider);
+
+            // Switch / Add Another Google Account button
+            const switchGoogleBtn = document.createElement('button');
+            switchGoogleBtn.type = 'button';
+            switchGoogleBtn.className = 'profile-menu-item';
+            switchGoogleBtn.setAttribute('role', 'menuitem');
+
+            const plusIcon = document.createElement('div');
+            plusIcon.className = 'profile-menu-action-icon';
+            plusIcon.textContent = '+';
+
+            const switchMeta = document.createElement('div');
+            switchMeta.className = 'profile-menu-meta';
+
+            const switchTitle = document.createElement('div');
+            switchTitle.className = 'profile-menu-name';
+            switchTitle.textContent = 'Switch / Add Google Account';
+
+            const switchSub = document.createElement('div');
+            switchSub.className = 'profile-menu-email';
+            switchSub.textContent = 'Choose another account via Google';
+
+            switchMeta.append(switchTitle, switchSub);
+            switchGoogleBtn.append(plusIcon, switchMeta);
+            switchGoogleBtn.addEventListener('click', () => {
+                closeProfileMenu();
+                startSignIn(false);
+            });
+            menu.appendChild(switchGoogleBtn);
+
+            // Sign Out option inside profile menu
+            const signOutBtn = document.createElement('button');
+            signOutBtn.type = 'button';
+            signOutBtn.className = 'profile-menu-item';
+            signOutBtn.setAttribute('role', 'menuitem');
+
+            const outIcon = document.createElement('div');
+            outIcon.className = 'profile-menu-action-icon';
+            outIcon.textContent = '→';
+
+            const outMeta = document.createElement('div');
+            outMeta.className = 'profile-menu-meta';
+
+            const outTitle = document.createElement('div');
+            outTitle.className = 'profile-menu-name';
+            outTitle.textContent = 'Sign Out of Current Profile';
+
+            const outSub = document.createElement('div');
+            outSub.className = 'profile-menu-email';
+            outSub.textContent = currentUser && currentUser.email ? String(currentUser.email) : '';
+
+            outMeta.append(outTitle, outSub);
+            signOutBtn.append(outIcon, outMeta);
+            signOutBtn.addEventListener('click', () => {
+                closeProfileMenu();
+                logout();
+            });
+            menu.appendChild(signOutBtn);
+        }
+
+        async function switchProfileTo(targetSessionId, btnEl, badgeEl) {
+            if (!targetSessionId) return;
+            if (btnEl) btnEl.disabled = true;
+            if (badgeEl) badgeEl.textContent = 'Switching...';
+            hideBanner();
+
+            try {
+                const response = await fetch(`${apiBase}/auth/switch-profile`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ session_id: targetSessionId }),
+                });
+                const data = await parseJsonSafe(response);
+                if (!response.ok) {
+                    closeProfileMenu();
+                    showBanner(extractErrorMessage(data, 'Could not switch to that profile. Signing in via Google...'), 'error');
+                    return;
+                }
+
+                sessionToken = data.session_token || targetSessionId;
+                isAuthenticated = true;
+                currentUser = data.user || currentUser;
+                availableProfiles = Array.isArray(data.profiles) ? data.profiles : availableProfiles;
+                capabilities = data.capabilities || capabilities;
+                closeProfileMenu();
+                updateHeader();
+                updateCapabilityBanner();
+                await loadTasks(false, true);
+                if (currentUser && currentUser.email) {
+                    showBanner(`Switched active profile to ${currentUser.email}.`, 'info');
+                }
+            } catch (error) {
+                closeProfileMenu();
+                showBanner('Failed to switch profile: ' + error.message, 'error');
             }
         }
 
@@ -2198,9 +2598,11 @@
             const headers = buildAuthHeaders();
             const wasSignedIn = isAuthenticated || Boolean(sessionToken);
             stopAutoRefresh();
+            closeProfileMenu();
             sessionToken = null;
             isAuthenticated = false;
             currentUser = null;
+            availableProfiles = [];
             capabilities = null;
             tasks = [];
             pendingAnalysisCount = 0;
@@ -2220,6 +2622,7 @@
         }
 
         function showAuthContainer() {
+            closeProfileMenu();
             document.getElementById('authContainer').style.display = 'flex';
             document.getElementById('mainContent').style.display = 'none';
             document.getElementById('userInfo').style.display = 'none';

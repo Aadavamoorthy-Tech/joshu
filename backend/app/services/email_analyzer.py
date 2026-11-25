@@ -498,7 +498,7 @@ def _extract_payment_from_text(subject: str, body: str) -> tuple[bool, Optional[
         if _UPI_ID_RE.match(candidate):
             upi_id = candidate
     if not upi_id:
-        for match in re.finditer(r"\b([A-Za-z0-9._\-]{2,64})@([A-Za-z]{2,32})(?!\.[A-Za-z])", combined):
+        for match in re.finditer(r"\b([A-Za-z0-9._\-]{2,64})@([A-Za-z]{2,32})\b(?!\.[A-Za-z0-9])", combined):
             handle = match.group(2).lower()
             if handle not in _COMMON_EMAIL_PROVIDERS:
                 candidate = f"{match.group(1).lower()}@{handle}"
