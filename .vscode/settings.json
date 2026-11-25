@@ -1,4 +1,8 @@
 {
-    "cmake.sourceDirectory": "C:/Users/bhaga/Desktop/joshu/app/windows",
-    "python.terminal.useEnvFile": true
+    "python.terminal.useEnvFile": true,
+    "[dart]": {
+        "editor.formatOnSave": false,
+        "editor.codeActionsOnSave": {}
+    },
+    "extensions.ignoreRecommendations": true
 }
