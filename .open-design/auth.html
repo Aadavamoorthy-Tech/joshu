@@ -1366,29 +1366,6 @@
 
             <!-- Agent Tab Panel (Gemini UI Style) -->
             <div id="agentPanel" class="view-panel">
-<<<<<<< HEAD
-                <div class="container">
-                    <div class="agent-card">
-                        <div class="agent-header-row">
-                            <div>
-                                <div class="agent-header-title">
-                                    <span>Joshu Autonomous Agent</span>
-                                    <span class="agent-status-badge">Full App Control</span>
-                                </div>
-                                <div class="agent-header-subtitle">
-                                    Configure automatic payments, inbox rules, and Google service integrations, or instruct Joshu to execute tasks directly.
-                                </div>
-                            </div>
-                            <div style="display: flex; gap: 8px; align-items: center;">
-                                <button type="button" id="agentClearHistoryBtn" class="btn btn-secondary" style="font-size: 12px; padding: 6px 10px;">
-                                    Clear Chat
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Chat Stream -->
-                        <div class="agent-chat-stream" id="agentChatMessages" aria-live="polite"></div>
-=======
                 <div class="agent-gemini-stage empty-state" id="agentGeminiStage">
                     <button type="button" id="agentClearHistoryBtn" class="btn btn-secondary agent-clear-top-btn">
                         Clear Chat
@@ -1398,7 +1375,6 @@
 
                     <!-- Conversation Canvas (No outer box) -->
                     <div class="agent-chat-stream" id="agentChatMessages" aria-live="polite"></div>
->>>>>>> 5b63d205ed07706e572ef6510cdc72f81da2e2dc
 
                     <!-- Pill Prompt Bar -->
                     <div class="agent-prompt-box">
@@ -3158,23 +3134,7 @@
                 stage.classList.toggle('has-messages', hasAnyMessages);
             }
 
-<<<<<<< HEAD
-                const role = document.createElement('div');
-                role.className = 'agent-msg-role';
-                role.textContent = 'Joshu Agent';
-
-                const body = document.createElement('div');
-                body.textContent =
-                    'Hello! I am your Joshu Agent with full control over this application.\n\n' +
-                    '• Ask me to automate rules (e.g. "Make all payments under 1000 Rs automatically without asking") and I will remember your rule, update the backend policy, and immediately execute matching tasks.\n' +
-                    '• Ask me to connect Google Drive, Google Sheets, Google Docs, Google Contacts, Google Tasks, or Google Meet.\n' +
-                    '• Ask me to approve/reject tasks, send emails, schedule meetings, or sync your inbox.';
-
-                welcome.append(role, body);
-                stream.appendChild(welcome);
-=======
             if (!hasAnyMessages) {
->>>>>>> 5b63d205ed07706e572ef6510cdc72f81da2e2dc
                 return;
             }
 
@@ -3185,13 +3145,6 @@
                 if (msg.id) {
                     box.id = `agent-msg-${msg.id}`;
                 }
-<<<<<<< HEAD
-
-                const role = document.createElement('div');
-                role.className = 'agent-msg-role';
-                role.textContent = isUser ? 'You' : 'Joshu Agent';
-=======
->>>>>>> 5b63d205ed07706e572ef6510cdc72f81da2e2dc
 
                 const content = document.createElement('div');
                 content.textContent = msg.content || '';
@@ -3226,48 +3179,6 @@
                 if (connectActions.length > 0) {
                     const actionList = document.createElement('div');
                     actionList.className = 'agent-action-list';
-<<<<<<< HEAD
-
-                    actions.forEach((act) => {
-                        if (
-                            act.show_rules ||
-                            act.tool === 'show_autonomous_rules' ||
-                            act.tool === 'set_auto_payment_rule' ||
-                            act.tool === 'set_autonomy_rule'
-                        ) {
-                            shouldShowRules = true;
-                        }
-                        if (
-                            act.show_services ||
-                            act.tool === 'list_connectable_google_services' ||
-                            act.tool === 'connect_google_service'
-                        ) {
-                            shouldShowServices = true;
-                        }
-
-                        const badge = document.createElement('div');
-                        badge.className = 'agent-action-badge';
-
-                        const summaryLine = document.createElement('div');
-                        summaryLine.textContent = `⚡ ${act.summary || act.tool || 'Executed action'}`;
-                        badge.appendChild(summaryLine);
-
-                        if (act.connect_service && Array.isArray(act.scopes)) {
-                            const connectBtn = document.createElement('button');
-                            connectBtn.type = 'button';
-                            connectBtn.className = 'btn btn-primary';
-                            connectBtn.style.alignSelf = 'flex-start';
-                            connectBtn.style.fontSize = '12px';
-                            connectBtn.style.padding = '5px 10px';
-                            connectBtn.textContent = `Authorize ${act.service_name || 'Google Service'} with Google OAuth`;
-                            connectBtn.addEventListener('click', () => {
-                                startSignIn(true, act.scopes);
-                            });
-                            badge.appendChild(connectBtn);
-                        }
-
-                        actionList.appendChild(badge);
-=======
                     connectActions.forEach((act) => {
                         const connectBtn = document.createElement('button');
                         connectBtn.type = 'button';
@@ -3279,7 +3190,6 @@
                             startSignIn(true, act.scopes);
                         });
                         actionList.appendChild(connectBtn);
->>>>>>> 5b63d205ed07706e572ef6510cdc72f81da2e2dc
                     });
                     box.appendChild(actionList);
                 }
@@ -3335,12 +3245,9 @@
             });
             input.value = '';
             renderAgentState();
-<<<<<<< HEAD
-=======
 
             const controller = new AbortController();
             agentAbortController = controller;
->>>>>>> 5b63d205ed07706e572ef6510cdc72f81da2e2dc
 
             try {
                 const response = await fetch(`${apiBase}/agent/chat`, {
@@ -3403,10 +3310,6 @@
                 if (response.ok) {
                     agentMessages = [];
                     renderAgentState();
-<<<<<<< HEAD
-                    showBanner('Agent conversation history cleared. Saved autonomous rules remain active.', 'info');
-=======
->>>>>>> 5b63d205ed07706e572ef6510cdc72f81da2e2dc
                 }
             } catch (_) {
             } finally {
