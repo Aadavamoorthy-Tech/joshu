@@ -356,6 +356,374 @@ def _sanitize_analysis_payload(
     }
 
 
+_FALLBACK_GEMINI_MODELS = (
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.5-flash-lite",
+)
+
+_NO_REPLY_PATTERNS = (
+    "no-reply",
+    "noreply",
+    "do-not-reply",
+    "donotreply",
+    "mailer-daemon",
+    "postmaster",
+    "notifications@",
+    "notification@",
+    "alerts@",
+    "alert@",
+    "newsletter@",
+    "newsletters@",
+    "auto-confirm",
+    "automated@",
+)
+
+_COMMON_EMAIL_PROVIDERS = {
+    "gmail",
+    "googlemail",
+    "google",
+    "yahoo",
+    "ymail",
+    "outlook",
+    "hotmail",
+    "live",
+    "msn",
+    "icloud",
+    "me",
+    "aol",
+    "proton",
+    "protonmail",
+    "zoho",
+    "gmx",
+    "mail",
+}
+
+
+def _extract_payment_from_text(subject: str, body: str) -> tuple[bool, Optional[float], str, str, str, str, str]:
+    """Deterministically extract payment intent, amount, currency, UPI ID, bank account, IFSC, and reference."""
+    combined = f"{subject}\n{body or ''}"
+    lower = combined.lower()
+
+    non_payment_alerts = (
+        "security alert",
+        "recovery phone",
+        "recovery email",
+        "new sign-in",
+        "verification code",
+        "password changed",
+        "two-step verification",
+        "2-step verification",
+    )
+    if any(term in lower for term in non_payment_alerts):
+        return False, None, "INR", "", "", "", ""
+
+    payment_cues = (
+        "invoice",
+        "payment due",
+        "amount due",
+        "total due",
+        "balance due",
+        "bill",
+        "renewal",
+        "please pay",
+        "pay now",
+        "payment request",
+        "remittance",
+        "outstanding",
+        "overdue",
+        "upi",
+        "vpa",
+        "ifsc",
+        "neft",
+        "imps",
+        "rtgs",
+    )
+    subject_has_due = bool(re.search(r"\b(?:due|payable|invoice|bill|renewal|payment)\b", subject.lower()))
+    has_payment_cue = subject_has_due or any(cue in lower for cue in payment_cues)
+
+    amount: Optional[float] = None
+    currency = "INR"
+
+    currency_patterns = [
+        (r"(?:rs\.?|inr|₹)\s*([0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)", "INR"),
+        (r"([0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)\s*(?:rs\.?|inr|₹)", "INR"),
+        (r"(?:\$|usd)\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)", "USD"),
+        (r"(?:€|eur)\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)", "EUR"),
+        (r"(?:£|gbp)\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)", "GBP"),
+    ]
+    for pattern, cur in currency_patterns:
+        match = re.search(pattern, combined, flags=re.IGNORECASE)
+        if match:
+            raw_num = match.group(1).replace(",", "")
+            try:
+                val = float(raw_num)
+                if val > 0:
+                    amount = round(val, 2)
+                    currency = cur
+                    break
+            except ValueError:
+                pass
+
+    if amount is None and has_payment_cue:
+        fallback_amt = re.search(
+            r"(?:amount|total|pay|due|sum)[\s:of\-]*([0-9]{1,3}(?:,[0-9]{2,3})+(?:\.[0-9]{1,2})?|[0-9]{2,8}(?:\.[0-9]{1,2})?)",
+            combined,
+            flags=re.IGNORECASE,
+        )
+        if fallback_amt:
+            try:
+                val = float(fallback_amt.group(1).replace(",", ""))
+                if val > 0:
+                    amount = round(val, 2)
+            except ValueError:
+                pass
+
+    # Extract UPI ID (VPA) — Indian VPAs have no dot after '@' (e.g. name@okaxis, merchant@icici)
+    upi_id = ""
+    explicit_upi = re.search(
+        r"(?:upi(?:\s*id)?|vpa)[\s:=\-]*([A-Za-z0-9._\-]{2,256}@[A-Za-z]{2,64})\b",
+        combined,
+        flags=re.IGNORECASE,
+    )
+    if explicit_upi:
+        candidate = explicit_upi.group(1).strip().lower()
+        if _UPI_ID_RE.match(candidate):
+            upi_id = candidate
+    if not upi_id:
+        for match in re.finditer(r"\b([A-Za-z0-9._\-]{2,64})@([A-Za-z]{2,32})(?!\.[A-Za-z])", combined):
+            handle = match.group(2).lower()
+            if handle not in _COMMON_EMAIL_PROVIDERS:
+                candidate = f"{match.group(1).lower()}@{handle}"
+                if _UPI_ID_RE.match(candidate):
+                    upi_id = candidate
+                    break
+
+    ifsc = ""
+    ifsc_match = re.search(r"\b([A-Z]{4}0[A-Z0-9]{6})\b", combined.upper())
+    if ifsc_match:
+        ifsc = ifsc_match.group(1)
+
+    bank_acct = ""
+    acct_match = re.search(
+        r"(?:account(?:\s*no\.?|\s*number)?|a/c(?:\s*no\.?)?|acct(?:\s*no\.?)?)[\s#:.\-]*([0-9]{9,18})\b",
+        combined,
+        flags=re.IGNORECASE,
+    )
+    if acct_match:
+        bank_acct = acct_match.group(1)
+
+    invoice_ref = ""
+    inv_match = re.search(
+        r"(?:invoice|inv|policy|bill|ref|reference)(?:\s*(?:no|num|number|id|#))?[\s#:.\-]+([A-Za-z0-9\-/]{3,32})",
+        combined,
+        flags=re.IGNORECASE,
+    )
+    if inv_match:
+        invoice_ref = inv_match.group(1).strip()
+    elif subject:
+        invoice_ref = re.split(r"\s*[-–|:]\s*", subject.strip())[0][:80]
+
+    already_paid = any(
+        phrase in lower
+        for phrase in ("payment received", "thank you for your payment", "payment successful", "receipt for your payment")
+    ) and not any(phrase in lower for phrase in ("amount due", "payment due", "please pay"))
+
+    is_payment = bool((has_payment_cue and (amount is not None or upi_id or bank_acct)) and not already_paid)
+    return is_payment, amount, currency, upi_id, bank_acct, ifsc, invoice_ref
+
+
+def build_instant_analysis(
+    *,
+    subject: str,
+    sender: str,
+    body: str,
+    received_at_iso: Optional[str] = None,
+    reply_to: Optional[str] = None,
+    existing_calendar: Optional[Dict[str, Any]] = None,
+    user_name: Optional[str] = None,
+    user_email: Optional[str] = None,
+    needs_deep_ai: bool = False,
+) -> Dict[str, Any]:
+    """Deterministically analyze an email in <1ms so every task immediately has accurate actions and dynamic buttons."""
+    clean_subj = _clean_single_line(subject or "(No Subject)", 240)
+    raw_name, raw_addr = parseaddr(str(sender or ""))
+    sender_email = _clean_email_addr(reply_to) or _clean_email_addr(raw_addr) or _clean_email_addr(sender)
+    sender_display = _clean_single_line(
+        raw_name or (sender_email.split("@")[0].replace(".", " ").title() if sender_email else "Sender"),
+        120,
+    )
+    user_display = _clean_single_line(user_name or "Executive", 120)
+    processed_folder = (os.getenv("GMAIL_PROCESSED_LABEL") or "Joshu/Processed").strip() or "Joshu/Processed"
+
+    combined = f"{clean_subj}\n{body or ''}"
+    lower = combined.lower()
+    sender_lower = f"{sender or ''} {sender_email}".lower()
+    is_no_reply = any(pat in sender_lower for pat in _NO_REPLY_PATTERNS)
+
+    is_payment, amount, currency, upi_id, bank_acct, ifsc, invoice_ref = _extract_payment_from_text(
+        clean_subj, body or ""
+    )
+
+    has_existing_cal = bool(existing_calendar and (existing_calendar.get("start_iso") or existing_calendar.get("title")))
+    meeting_cues = (
+        "invitation:",
+        "meeting",
+        "calendar",
+        "zoom.us",
+        "meet.google.com",
+        "teams.microsoft.com",
+        "schedule a call",
+        "scheduled call",
+        "conference call",
+        "sync up",
+        "appointment",
+        "webinar",
+    )
+    rsvp_cues = (
+        "rsvp",
+        "confirm your attendance",
+        "confirm attendance",
+        "please confirm if you",
+        "let me know if you can attend",
+        "let me know if you can make it",
+        "let us know if you can join",
+        "will you be attending",
+        "can you join",
+        "are you available",
+    )
+    is_rsvp = any(cue in lower for cue in rsvp_cues)
+    is_meeting = not is_payment and (has_existing_cal or is_rsvp or any(cue in lower for cue in meeting_cues))
+
+    reply_cues = (
+        "?",
+        "please let me know",
+        "could you",
+        "can you",
+        "please share",
+        "please confirm",
+        "please send",
+        "get back to me",
+        "looking forward to hearing",
+        "awaiting your",
+        "your thoughts",
+        "your feedback",
+        "action required",
+        "please review and reply",
+    )
+    is_reply_needed = (
+        not is_payment
+        and not is_meeting
+        and not is_no_reply
+        and any(cue in lower for cue in reply_cues)
+    )
+
+    first_sentence = _clean_single_line(body or clean_subj, 260)
+    if not first_sentence:
+        first_sentence = clean_subj
+
+    category = "informational"
+    requires_reply = False
+    requires_payment = False
+    requires_calendar = False
+    requires_rsvp = False
+    draft_body = ""
+    recommended_action = f"Mark '{clean_subj}' as read and move to {processed_folder}?"
+
+    if is_payment:
+        category = "payment_request"
+        requires_payment = True
+        amt_label = (
+            f"₹{amount:,.2f}" if (amount and currency == "INR") else (f"{amount:.2f} {currency}" if amount else currency)
+        )
+        summary = f"Payment request from {sender_display} for {amt_label} ({clean_subj})."
+        recommended_action = f"Approve automatic payment of {amt_label} to {sender_display}?"
+    elif is_meeting:
+        requires_calendar = True
+        if is_rsvp and not is_no_reply:
+            category = "meeting_rsvp"
+            requires_rsvp = True
+            requires_reply = True
+            draft_body = (
+                f"Hi {sender_display},\n\n"
+                f"Thank you for the invitation. I confirm my attendance for {clean_subj}.\n\n"
+                f"Best regards,\n{user_display}"
+            )
+            summary = f"Meeting invitation from {sender_display} requesting RSVP confirmation: {clean_subj}."
+            recommended_action = f"Send RSVP confirmation to {sender_display} and add '{clean_subj}' to Google Calendar?"
+        else:
+            category = "meeting_invite"
+            summary = f"Meeting scheduled by {sender_display}: {clean_subj}."
+            recommended_action = f"Add '{clean_subj}' to Google Calendar and archive email?"
+    elif is_reply_needed:
+        category = "reply_needed"
+        requires_reply = True
+        draft_body = (
+            f"Hi {sender_display},\n\n"
+            f"Thank you for your email regarding {clean_subj}. I have reviewed the details and am following up as requested.\n\n"
+            f"Best regards,\n{user_display}"
+        )
+        summary = f"{sender_display} sent a message requiring your response: {first_sentence}"
+        recommended_action = f"Send drafted reply to {sender_display}?"
+    else:
+        category = "informational"
+        summary = f"{sender_display}: {first_sentence}"
+        recommended_action = f"Mark this email from {sender_display} as read and move to {processed_folder}?"
+
+    cal_data = existing_calendar or {}
+    cal_start = _normalize_iso_datetime(cal_data.get("start_iso")) or _normalize_iso_datetime(received_at_iso)
+    cal_end = _normalize_iso_datetime(cal_data.get("end_iso"))
+
+    parsed_payload: Dict[str, Any] = {
+        "category": category,
+        "summary": summary,
+        "recommended_action": recommended_action,
+        "requires_reply": requires_reply,
+        "draft_reply": {
+            "to": sender_email,
+            "subject": clean_subj if clean_subj.lower().startswith("re:") else f"Re: {clean_subj}",
+            "body": draft_body,
+        },
+        "requires_payment": requires_payment,
+        "payment": {
+            "amount": amount if amount is not None else 0.0,
+            "currency": currency,
+            "payee_name": sender_display,
+            "payee_email": sender_email,
+            "payee_upi_id": upi_id,
+            "payee_bank_account": bank_acct,
+            "payee_ifsc": ifsc,
+            "invoice_number": invoice_ref,
+            "due_date": "",
+            "payment_reference": invoice_ref or clean_subj,
+            "payment_url": "",
+        },
+        "requires_calendar": requires_calendar,
+        "requires_rsvp": requires_rsvp,
+        "calendar_event": {
+            "title": cal_data.get("title") or clean_subj,
+            "start_iso": cal_start,
+            "end_iso": cal_end,
+            "location": cal_data.get("location") or "",
+            "description": cal_data.get("description") or (body or "")[:1000],
+            "attendees": cal_data.get("attendees") or ([sender_email] if sender_email else []),
+        },
+        "confidence": "high" if (is_payment or has_existing_cal) else "medium",
+    }
+
+    result = _sanitize_analysis_payload(
+        parsed_payload,
+        subject=clean_subj,
+        sender=sender,
+        reply_to=reply_to,
+        existing_calendar=existing_calendar,
+        processed_folder=processed_folder,
+    )
+    if needs_deep_ai:
+        result["needs_deep_ai"] = True
+    return result
+
+
 def analyze_email_with_gemini(
     *,
     subject: str,
@@ -367,16 +735,24 @@ def analyze_email_with_gemini(
     user_name: Optional[str] = None,
     user_email: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Call Gemini REST API to comprehend an email and return sanitized action metadata."""
+    """Call Gemini REST API (with automatic model fallback on 404/429) to comprehend an email."""
     api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
     if not is_ai_configured():
         raise EmailAnalysisConfigError(
             "GEMINI_API_KEY is not configured in backend/.env. Add your Gemini API key and restart the backend to enable AI email understanding and reply drafting."
         )
 
-    model = get_gemini_model()
+    primary_model = get_gemini_model()
+    candidate_models: List[str] = [primary_model]
+    for fallback_model in _FALLBACK_GEMINI_MODELS:
+        if fallback_model not in candidate_models:
+            candidate_models.append(fallback_model)
+
     processed_folder = (os.getenv("GMAIL_PROCESSED_LABEL") or "Joshu/Processed").strip() or "Joshu/Processed"
-    reference_time = received_at_iso or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    reference_time = (
+        received_at_iso
+        or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
 
     calendar_hint = ""
     if existing_calendar:
@@ -391,7 +767,7 @@ def analyze_email_with_gemini(
         f"From: {sender}\n"
         f"Reply-To: {reply_to or sender}\n"
         f"Subject: {subject}\n"
-        f"Body:\n{(body or '')[:6000]}\n"
+        f"Body:\n{(body or '')[:3500]}\n"
         "</UNTRUSTED_EMAIL>"
     )
 
@@ -399,12 +775,12 @@ def analyze_email_with_gemini(
         "system_instruction": {"parts": [{"text": _SYSTEM_INSTRUCTION}]},
         "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
         "generationConfig": {
+            "temperature": 0.1,
             "responseMimeType": "application/json",
             "responseSchema": _ANALYSIS_RESPONSE_SCHEMA,
         },
     }
 
-    url = f"{GEMINI_API_BASE}/{model}:generateContent"
     headers = {
         "Content-Type": "application/json",
         "x-goog-api-key": api_key,
@@ -413,24 +789,27 @@ def analyze_email_with_gemini(
 
     last_exc: Optional[Exception] = None
     response: Optional[requests.Response] = None
-    for attempt in range(3):
+    used_model = primary_model
+
+    for model in candidate_models:
+        used_model = model
+        url = f"{GEMINI_API_BASE}/{model}:generateContent"
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=25)
-            if response.status_code in (429, 500, 502, 503, 504) and attempt < 2:
-                time.sleep(0.8 * (2**attempt))
-                continue
-            break
+            response = requests.post(url, headers=headers, json=payload, timeout=12)
         except requests.RequestException as exc:
             last_exc = exc
-            if attempt < 2:
-                time.sleep(0.8 * (2**attempt))
-                continue
-            raise EmailAnalysisApiError(
-                "Could not reach Gemini API to analyze this email. Check your internet connection."
-            ) from exc
+            continue
+
+        if response.status_code == 200:
+            break
+        if response.status_code in (404, 429, 500, 502, 503, 504):
+            continue
+        break
 
     if response is None:
-        raise EmailAnalysisApiError("Gemini API request failed.") from last_exc
+        raise EmailAnalysisApiError(
+            "Could not reach Gemini API to analyze this email. Check your internet connection."
+        ) from last_exc
 
     if response.status_code == 400:
         raise EmailAnalysisApiError(
@@ -444,7 +823,7 @@ def analyze_email_with_gemini(
         )
     if response.status_code == 404:
         raise EmailAnalysisApiError(
-            f"Gemini model '{model}' was not found (404). Set GEMINI_MODEL=gemini-4-hydrogen in backend/.env.",
+            f"Gemini model '{used_model}' was not found (404). Set GEMINI_MODEL=gemini-2.5-flash in backend/.env.",
             status_code=404,
         )
     if response.status_code == 429:
@@ -474,7 +853,7 @@ def analyze_email_with_gemini(
             "Gemini returned an unreadable analysis payload. Please try analyzing again."
         ) from exc
 
-    return _sanitize_analysis_payload(
+    result = _sanitize_analysis_payload(
         parsed,
         subject=subject,
         sender=sender,
@@ -482,3 +861,47 @@ def analyze_email_with_gemini(
         existing_calendar=existing_calendar,
         processed_folder=processed_folder,
     )
+    result["model"] = used_model
+    result["needs_deep_ai"] = False
+    return result
+
+
+def analyze_email_smart(
+    *,
+    subject: str,
+    sender: str,
+    body: str,
+    received_at_iso: Optional[str] = None,
+    reply_to: Optional[str] = None,
+    existing_calendar: Optional[Dict[str, Any]] = None,
+    user_name: Optional[str] = None,
+    user_email: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Analyze an email with Gemini AI first, falling back to instant deterministic triage if rate-limited."""
+    if is_ai_configured():
+        try:
+            return analyze_email_with_gemini(
+                subject=subject,
+                sender=sender,
+                body=body,
+                received_at_iso=received_at_iso,
+                reply_to=reply_to,
+                existing_calendar=existing_calendar,
+                user_name=user_name,
+                user_email=user_email,
+            )
+        except EmailAnalysisError as exc:
+            logger.info("Using instant triage fallback for subject=%r (%s)", subject, exc)
+
+    return build_instant_analysis(
+        subject=subject,
+        sender=sender,
+        body=body,
+        received_at_iso=received_at_iso,
+        reply_to=reply_to,
+        existing_calendar=existing_calendar,
+        user_name=user_name,
+        user_email=user_email,
+        needs_deep_ai=False,
+    )
+

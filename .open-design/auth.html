@@ -1127,10 +1127,7 @@
                     showMainContent();
                     startAutoRefresh();
                     await fetchCapabilities();
-                    await loadTasks();
-                    if (tasks.length === 0 && pendingAnalysisCount === 0) {
-                        await syncInboxNow(true);
-                    }
+                    await loadTasks(false, true);
                 } else {
                     showBanner('Authentication failed: ' + (data.message || 'Invalid sign-in code.'), 'error');
                     showAuthContainer();
@@ -1162,10 +1159,7 @@
                     showMainContent();
                     startAutoRefresh();
                     await fetchCapabilities();
-                    await loadTasks();
-                    if (tasks.length === 0 && pendingAnalysisCount === 0) {
-                        await syncInboxNow(true);
-                    }
+                    await loadTasks(false, true);
                 } else {
                     showBanner('Authentication failed: ' + (data.message || 'Unexpected response from server.'), 'error');
                     showAuthContainer();
@@ -1235,10 +1229,7 @@
                 showMainContent();
                 updateCapabilityBanner();
                 startAutoRefresh();
-                await loadTasks();
-                if (tasks.length === 0 && pendingAnalysisCount === 0) {
-                    await syncInboxNow(true);
-                }
+                await loadTasks(false, true);
                 return true;
             } catch (_) {
                 isAuthenticated = false;
@@ -1248,11 +1239,11 @@
             }
         }
 
-        async function loadTasks(silent = false) {
+        async function loadTasks(silent = false, triggerSync = false) {
             if (!isAuthenticated) return;
-            if (!silent) setSyncState(true, 'Loading reviews...');
             try {
-                const response = await fetch(`${apiBase}/tasks?limit=100&analyzed_only=true`, {
+                const syncParam = triggerSync ? '&trigger_sync=true' : '';
+                const response = await fetch(`${apiBase}/tasks?limit=100&analyzed_only=true${syncParam}`, {
                     credentials: 'include',
                     headers: buildAuthHeaders(),
                 });
@@ -1262,19 +1253,11 @@
                 }
                 const data = await parseJsonSafe(response);
                 tasks = Array.isArray(data.tasks) ? data.tasks : [];
-                pendingAnalysisCount = Number(data.pending_analysis_count || 0);
+                pendingAnalysisCount = 0;
                 updateStats(data.counts || computeCounts(tasks));
                 renderFilteredTasks();
-                if (pendingAnalysisCount > 0) {
-                    setSyncState(
-                        true,
-                        `Analyzing ${pendingAnalysisCount} email${pendingAnalysisCount === 1 ? '' : 's'} in background…`
-                    );
-                    startAutoRefresh(4000);
-                } else {
-                    setSyncState(false, 'Synced');
-                    startAutoRefresh(30000);
-                }
+                setSyncState(false, 'Synced');
+                startAutoRefresh(tasks.length === 0 ? 3000 : 15000);
             } catch (error) {
                 if (!silent) {
                     setSyncState(false, 'Sync error');

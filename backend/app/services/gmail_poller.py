@@ -30,6 +30,7 @@ from app.models.task import GoogleOAuthToken, Task
 from app.services.email_analyzer import (
     EmailAnalysisError,
     analyze_email_with_gemini,
+    build_instant_analysis,
     is_ai_configured,
 )
 from app.services.invite_parser import (
@@ -43,8 +44,8 @@ from app.services.invite_parser import (
 logger = logging.getLogger("joshu.gmail_poller")
 
 DEFAULT_POLL_INTERVAL_MINUTES = 1
-DEFAULT_POLL_INTERVAL_SECONDS = 60
-BACKGROUND_RETRY_SECONDS = 20
+DEFAULT_POLL_INTERVAL_SECONDS = 20
+BACKGROUND_RETRY_SECONDS = 15
 DEFAULT_MAX_MESSAGES_PER_POLL = 25
 DEFAULT_GMAIL_QUERY = "in:inbox"
 FALLBACK_GMAIL_QUERY = "-in:trash -in:spam"
@@ -486,35 +487,31 @@ class GmailPollingService:
                 ignored_non_invites += 1
                 continue
 
-            if ai_enabled:
-                received_iso = (
-                    task_scheduled_for.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
-                    if task_scheduled_for
-                    else None
-                )
-                try:
-                    analysis = analyze_email_with_gemini(
-                        subject=task_title,
-                        sender=str(raw_data.get("organizer") or msg_headers.get("from") or "Unknown Sender"),
-                        body=task_description,
-                        received_at_iso=received_iso,
-                        reply_to=raw_data.get("reply_to"),
-                        existing_calendar=existing_cal,
-                        user_name=user_name,
-                        user_email=user_email,
-                    )
-                    raw_data["ai_analysis"] = analysis
-                    raw_data.pop("ai_analysis_error", None)
-                    cal_info = analysis.get("calendar_event") or {}
-                    if analysis.get("requires_calendar") and cal_info.get("start_iso"):
-                        parsed_start = _parse_iso_naive_utc(cal_info.get("start_iso"))
-                        if parsed_start is not None:
-                            task_scheduled_for = parsed_start
-                        if task_source != "calendar":
-                            task_source = "calendar"
-                except EmailAnalysisError as exc:
-                    logger.warning("AI analysis skipped for msg_id=%s: %s", msg_id, exc)
-                    raw_data["ai_analysis_error"] = str(exc)
+            received_iso = (
+                task_scheduled_for.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+                if task_scheduled_for
+                else None
+            )
+            instant_analysis = build_instant_analysis(
+                subject=task_title,
+                sender=str(raw_data.get("organizer") or msg_headers.get("from") or "Unknown Sender"),
+                body=task_description,
+                received_at_iso=received_iso,
+                reply_to=raw_data.get("reply_to"),
+                existing_calendar=existing_cal,
+                user_name=user_name,
+                user_email=user_email,
+                needs_deep_ai=ai_enabled,
+            )
+            raw_data["ai_analysis"] = instant_analysis
+            raw_data.pop("ai_analysis_error", None)
+            cal_info = instant_analysis.get("calendar_event") or {}
+            if instant_analysis.get("requires_calendar") and cal_info.get("start_iso"):
+                parsed_start = _parse_iso_naive_utc(cal_info.get("start_iso"))
+                if parsed_start is not None:
+                    task_scheduled_for = parsed_start
+                if task_source != "calendar":
+                    task_source = "calendar"
 
             db.add(
                 Task(
@@ -535,8 +532,6 @@ class GmailPollingService:
 
             existing_ids.add(msg_id)
             created_count += 1
-            if ai_enabled:
-                time.sleep(0.25)
 
         synced_at = utc_now()
         token_record.last_synced_at = synced_at
@@ -544,15 +539,13 @@ class GmailPollingService:
         token_record.updated_at = synced_at
         db.commit()
 
-        analyzed_existing = 0
-        if ai_enabled:
-            analyzed_existing = self.analyze_unanalyzed_pending_tasks(
-                db=db,
-                user_id=user_id,
-                user_name=user_name,
-                user_email=user_email,
-                limit=self._max_messages,
-            )
+        analyzed_existing = self.analyze_unanalyzed_pending_tasks(
+            db=db,
+            user_id=user_id,
+            user_name=user_name,
+            user_email=user_email,
+            limit=self._max_messages,
+        )
 
         logger.info(
             "Gmail poll finished user_id=%s query=%r fetched=%d created=%d analyzed_existing=%d skipped=%d ignored=%d",
@@ -584,10 +577,8 @@ class GmailPollingService:
         user_email: Optional[str] = None,
         limit: int = 25,
     ) -> int:
-        """Automatically analyze any pending tasks for a user that do not yet have AI analysis."""
-        if not is_ai_configured():
-            return 0
-
+        """Ensure every pending task has analysis immediately and enrich with Gemini when quota allows."""
+        ai_enabled = is_ai_configured()
         pending_tasks: List[Task] = (
             db.query(Task)
             .filter(Task.user_id == user_id, Task.status == "pending")
@@ -596,11 +587,14 @@ class GmailPollingService:
         )
         max_to_analyze = max(1, limit)
         analyzed_count = 0
+        gemini_quota_exhausted = not ai_enabled
+
         for task in pending_tasks:
-            if analyzed_count >= max_to_analyze:
-                break
             raw = dict(task.raw_data) if isinstance(task.raw_data, dict) else {}
-            if isinstance(raw.get("ai_analysis"), dict):
+            existing_ai = raw.get("ai_analysis") if isinstance(raw.get("ai_analysis"), dict) else None
+            needs_deep = bool(existing_ai and existing_ai.get("needs_deep_ai"))
+
+            if existing_ai is not None and not needs_deep:
                 continue
 
             existing_cal = None
@@ -623,47 +617,71 @@ class GmailPollingService:
                 if task.scheduled_for
                 else None
             )
-            try:
-                analysis = analyze_email_with_gemini(
-                    subject=task.title or "(No Subject)",
-                    sender=str(raw.get("organizer") or "Unknown Sender"),
-                    body=task.description or "",
-                    received_at_iso=received_iso,
-                    reply_to=raw.get("reply_to"),
-                    existing_calendar=existing_cal,
-                    user_name=user_name,
-                    user_email=user_email,
-                )
-                raw["ai_analysis"] = analysis
-                raw.pop("ai_analysis_error", None)
-                cal_info = analysis.get("calendar_event") or {}
-                if analysis.get("requires_calendar") and cal_info.get("start_iso"):
-                    parsed_start = _parse_iso_naive_utc(cal_info.get("start_iso"))
-                    if parsed_start is not None:
-                        task.scheduled_for = parsed_start
-                    if task.source != "calendar":
-                        task.source = "calendar"
-                task.raw_data = raw
-                flag_modified(task, "raw_data")
-                task.updated_at = utc_now()
-                db.commit()
-                analyzed_count += 1
-                time.sleep(0.25)
-            except EmailAnalysisError as exc:
-                logger.warning("Background AI analysis failed for task_id=%s: %s", task.id, exc)
-                raw["ai_analysis_error"] = str(exc)
-                task.raw_data = raw
-                flag_modified(task, "raw_data")
-                db.commit()
-                if getattr(exc, "status_code", None) in (400, 403, 404, 429):
-                    break
+
+            if not gemini_quota_exhausted and analyzed_count < max_to_analyze:
+                try:
+                    analysis = analyze_email_with_gemini(
+                        subject=task.title or "(No Subject)",
+                        sender=str(raw.get("organizer") or "Unknown Sender"),
+                        body=task.description or "",
+                        received_at_iso=received_iso,
+                        reply_to=raw.get("reply_to"),
+                        existing_calendar=existing_cal,
+                        user_name=user_name,
+                        user_email=user_email,
+                    )
+                    raw["ai_analysis"] = analysis
+                    raw.pop("ai_analysis_error", None)
+                    cal_info = analysis.get("calendar_event") or {}
+                    if analysis.get("requires_calendar") and cal_info.get("start_iso"):
+                        parsed_start = _parse_iso_naive_utc(cal_info.get("start_iso"))
+                        if parsed_start is not None:
+                            task.scheduled_for = parsed_start
+                        if task.source != "calendar":
+                            task.source = "calendar"
+                    task.raw_data = raw
+                    flag_modified(task, "raw_data")
+                    task.updated_at = utc_now()
+                    db.commit()
+                    analyzed_count += 1
+                    time.sleep(0.15)
+                    continue
+                except EmailAnalysisError as exc:
+                    logger.warning("Gemini analysis fallback for task_id=%s: %s", task.id, exc)
+                    if getattr(exc, "status_code", None) in (400, 403, 404, 429):
+                        gemini_quota_exhausted = True
+
+            # Guarantee task has complete structured analysis immediately even when Gemini is rate-limited
+            fallback_analysis = build_instant_analysis(
+                subject=task.title or "(No Subject)",
+                sender=str(raw.get("organizer") or "Unknown Sender"),
+                body=task.description or "",
+                received_at_iso=received_iso,
+                reply_to=raw.get("reply_to"),
+                existing_calendar=existing_cal,
+                user_name=user_name,
+                user_email=user_email,
+                needs_deep_ai=False,
+            )
+            raw["ai_analysis"] = fallback_analysis
+            raw.pop("ai_analysis_error", None)
+            cal_info = fallback_analysis.get("calendar_event") or {}
+            if fallback_analysis.get("requires_calendar") and cal_info.get("start_iso"):
+                parsed_start = _parse_iso_naive_utc(cal_info.get("start_iso"))
+                if parsed_start is not None:
+                    task.scheduled_for = parsed_start
+                if task.source != "calendar":
+                    task.source = "calendar"
+            task.raw_data = raw
+            flag_modified(task, "raw_data")
+            task.updated_at = utc_now()
+            db.commit()
+            analyzed_count += 1
 
         return analyzed_count
 
     def has_unanalyzed_pending_tasks(self, db: DBSession) -> bool:
-        """Return True if any connected user still has pending tasks awaiting AI analysis."""
-        if not is_ai_configured():
-            return False
+        """Return True if any connected user still has pending tasks missing analysis."""
         pending_tasks = (
             db.query(Task)
             .join(GoogleOAuthToken, GoogleOAuthToken.user_id == Task.user_id)

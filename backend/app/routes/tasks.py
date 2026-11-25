@@ -18,7 +18,9 @@ from app.models.task import GoogleOAuthToken, Task
 from app.services.email_analyzer import (
     EmailAnalysisApiError,
     EmailAnalysisConfigError,
+    analyze_email_smart,
     analyze_email_with_gemini,
+    build_instant_analysis,
 )
 from app.services.gmail_poller import (
     GmailApiError,
@@ -205,7 +207,7 @@ def _analyze_and_persist_task(db: DBSession, task: Task, user_name: str, user_em
             "attendees": raw.get("attendees") or [],
         }
 
-    analysis = analyze_email_with_gemini(
+    analysis = analyze_email_smart(
         subject=task.title,
         sender=str(raw.get("organizer") or "Unknown Sender"),
         body=task.description or "",
@@ -240,6 +242,7 @@ def list_tasks(
     status: Optional[str] = Query(default=None),
     source: Optional[str] = Query(default=None),
     analyzed_only: bool = Query(default=False),
+    trigger_sync: bool = Query(default=False),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     current_session: UserSession = Depends(get_current_session),
@@ -276,35 +279,62 @@ def list_tasks(
     all_user_tasks: List[Task] = (
         db.query(Task).filter(Task.user_id == current_session.user_id).all()
     )
-    pending_analysis_count = 0
+    user = current_session.user
+    user_name = (user.name if user and user.name else "Executive")
+    user_email = (user.email if user and user.email else "")
+
+    upgraded_any = False
+    needs_deep_count = 0
     ready_counts = {"pending": 0, "approved": 0, "rejected": 0}
     for t in all_user_tasks:
-        t_raw = t.raw_data if isinstance(t.raw_data, dict) else {}
-        is_analyzed = isinstance(t_raw.get("ai_analysis"), dict)
+        t_raw = dict(t.raw_data) if isinstance(t.raw_data, dict) else {}
+        ai_obj = t_raw.get("ai_analysis") if isinstance(t_raw.get("ai_analysis"), dict) else None
+        if t.status == "pending" and ai_obj is None:
+            existing_cal = None
+            if t.source == "calendar":
+                existing_cal = {
+                    "title": t.title,
+                    "start_iso": _format_utc(t.scheduled_for) or "",
+                    "end_iso": t_raw.get("end_time") or "",
+                    "location": t_raw.get("location") or "",
+                    "description": t.description or "",
+                    "attendees": t_raw.get("attendees") or [],
+                }
+            ai_obj = build_instant_analysis(
+                subject=t.title or "(No Subject)",
+                sender=str(t_raw.get("organizer") or "Unknown Sender"),
+                body=t.description or "",
+                received_at_iso=_format_utc(t.scheduled_for) or _format_utc(t.created_at),
+                reply_to=t_raw.get("reply_to") or t_raw.get("organizer"),
+                existing_calendar=existing_cal,
+                user_name=user_name,
+                user_email=user_email,
+                needs_deep_ai=True,
+            )
+            t_raw["ai_analysis"] = ai_obj
+            t_raw.pop("ai_analysis_error", None)
+            t.raw_data = t_raw
+            flag_modified(t, "raw_data")
+            upgraded_any = True
+
         if t.status == "pending":
-            if is_analyzed:
-                ready_counts["pending"] += 1
-            else:
-                pending_analysis_count += 1
-                if not analyzed_only:
-                    ready_counts["pending"] += 1
+            ready_counts["pending"] += 1
+            if isinstance(ai_obj, dict) and ai_obj.get("needs_deep_ai"):
+                needs_deep_count += 1
         elif t.status in ready_counts:
             ready_counts[t.status] += 1
+
+    if upgraded_any:
+        db.commit()
+
     ready_counts["all"] = (
         ready_counts["pending"] + ready_counts["approved"] + ready_counts["rejected"]
     )
 
-    if analyzed_only:
-        filtered_items = [
-            item
-            for item in all_matching
-            if item.status != "pending"
-            or (isinstance(item.raw_data, dict) and isinstance(item.raw_data.get("ai_analysis"), dict))
-        ]
-    else:
-        filtered_items = all_matching
+    filtered_items = all_matching
 
-    if pending_analysis_count > 0 and not is_user_sync_running(current_session.user_id):
+    sync_running = is_user_sync_running(current_session.user_id)
+    if (trigger_sync or needs_deep_count > 0) and not sync_running:
         background_tasks.add_task(_run_background_sync, current_session.user_id)
 
     total = len(filtered_items)
@@ -316,7 +346,8 @@ def list_tasks(
         "limit": limit,
         "offset": offset,
         "counts": ready_counts,
-        "pending_analysis_count": pending_analysis_count,
+        "pending_analysis_count": 0,
+        "sync_in_progress": False,
     }
 
 
