@@ -10,6 +10,16 @@ $python = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     throw 'Backend virtual environment not found. See README.md for setup.'
 }
+if ($BackendPort -eq $FrontendPort) {
+    throw 'The frontend and backend must use different ports.'
+}
+$listeners = [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
+$occupiedPorts = @($listeners | Where-Object {
+    $_.Port -eq $BackendPort -or $_.Port -eq $FrontendPort
+} | Select-Object -ExpandProperty Port -Unique)
+if ($occupiedPorts.Count -gt 0) {
+    throw "Port(s) $($occupiedPorts -join ', ') already in use. Stop the existing servers before starting this launcher."
+}
 
 # The launcher and its children belong to a job that closes with this process.
 Add-Type -TypeDefinition @'
@@ -79,9 +89,9 @@ $backend = Start-Process -FilePath $python -ArgumentList "-m uvicorn main:app --
 
 while ($true) {
     if ($frontend.WaitForExit(500)) {
-        throw "Frontend server stopped (exit code $($frontend.ExitCode)); stopping backend."
+        throw 'Frontend server stopped; stopping backend. See the output above for the cause.'
     }
     if ($backend.WaitForExit(500)) {
-        throw "Backend server stopped (exit code $($backend.ExitCode)); stopping frontend."
+        throw 'Backend server stopped; stopping frontend. See the output above for the cause.'
     }
 }
