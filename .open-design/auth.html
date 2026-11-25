@@ -917,6 +917,7 @@
         let listenersBound = false;
         let autoRefreshTimer = null;
         let currentRefreshMs = 30000;
+        const processingTasks = new Map();
 
         // Clear any legacy token previously saved in localStorage
         try { localStorage.removeItem('sessionToken'); } catch (_) {}
@@ -1436,6 +1437,21 @@
             return 'View Email';
         }
 
+        function getRunningApproveLabel(task) {
+            const ai = task.ai_analysis;
+            if (ai) {
+                if (ai.requires_rsvp || ai.category === 'meeting_rsvp') return 'Sending RSVP...';
+                if (ai.requires_payment || ai.category === 'payment_request') return 'Processing Payment...';
+                if (ai.requires_calendar || ai.category === 'meeting_invite') {
+                    return ai.requires_reply ? 'Sending RSVP...' : 'Adding to Calendar...';
+                }
+                if (ai.requires_reply || ai.category === 'reply_needed') return 'Sending Reply...';
+                return 'Archiving...';
+            }
+            if (task.source === 'calendar') return 'Adding to Calendar...';
+            return 'Archiving...';
+        }
+
         function cleanPreviewText(raw, maxLen = 220) {
             const normalized = String(raw || '').replace(/\s+/g, ' ').trim();
             if (!normalized) return '';
@@ -1531,7 +1547,10 @@
 
                 const item = document.createElement('div');
                 item.className = 'task-item';
-                item.addEventListener('click', () => openTaskModal(task.id));
+                item.addEventListener('click', () => {
+                    if (processingTasks.has(task.id)) return;
+                    openTaskModal(task.id);
+                });
 
                 const header = document.createElement('div');
                 header.className = 'task-header';
@@ -1626,12 +1645,17 @@
                 actionsEl.className = 'task-actions';
 
                 if (status === 'pending') {
+                    const activeProc = processingTasks.get(task.id) || null;
+                    const isBusy = Boolean(activeProc);
+
                     const reviewBtn = document.createElement('button');
                     reviewBtn.className = 'btn btn-secondary';
                     reviewBtn.type = 'button';
                     reviewBtn.textContent = getReviewButtonLabel(task);
+                    reviewBtn.disabled = isBusy;
                     reviewBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
+                        if (processingTasks.has(task.id)) return;
                         openTaskModal(task.id);
                     });
                     actionsEl.appendChild(reviewBtn);
@@ -1639,25 +1663,44 @@
                     const rejectBtn = document.createElement('button');
                     rejectBtn.className = 'btn btn-danger';
                     rejectBtn.type = 'button';
-                    rejectBtn.textContent = 'Reject';
-                    rejectBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        rejectTask(task.id);
-                    });
+                    rejectBtn.textContent =
+                        activeProc && activeProc.mode === 'reject' ? activeProc.label : 'Reject';
+                    rejectBtn.disabled = isBusy;
 
                     const isPayment = Boolean(ai && (ai.requires_payment || ai.category === 'payment_request'));
                     const approveBtn = document.createElement('button');
                     approveBtn.className = isPayment ? 'btn btn-warning' : 'btn btn-success';
                     approveBtn.type = 'button';
-                    approveBtn.textContent = getPrimaryApproveLabel(task);
-                    approveBtn.addEventListener('click', (e) => {
+                    approveBtn.textContent =
+                        activeProc && activeProc.mode === 'approve'
+                            ? activeProc.label
+                            : getPrimaryApproveLabel(task);
+                    approveBtn.disabled = isBusy;
+
+                    rejectBtn.addEventListener('click', async (e) => {
                         e.stopPropagation();
+                        if (processingTasks.has(task.id)) return;
+                        reviewBtn.disabled = true;
+                        rejectBtn.disabled = true;
+                        approveBtn.disabled = true;
+                        rejectBtn.textContent = 'Rejecting...';
+                        await rejectTask(task.id);
+                    });
+
+                    approveBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        if (processingTasks.has(task.id)) return;
                         // Payments always open the confirmation modal first so the user verifies payee & amount.
                         if (isPayment) {
                             openTaskModal(task.id);
                             return;
                         }
-                        approveTask(task.id, null);
+                        const runningLabel = getRunningApproveLabel(task);
+                        reviewBtn.disabled = true;
+                        rejectBtn.disabled = true;
+                        approveBtn.disabled = true;
+                        approveBtn.textContent = runningLabel;
+                        await approveTask(task.id, null);
                     });
 
                     actionsEl.append(rejectBtn, approveBtn);
@@ -1678,8 +1721,12 @@
         }
 
         async function approveTask(taskId, payload = null) {
+            if (processingTasks.has(taskId)) return false;
+            const taskObj = tasks.find((t) => t.id === taskId);
+            const runningLabel = taskObj ? getRunningApproveLabel(taskObj) : 'Processing...';
+            processingTasks.set(taskId, { mode: 'approve', label: runningLabel });
             hideBanner();
-            setSyncState(true, 'Executing...');
+            setSyncState(true, runningLabel);
             try {
                 const options = {
                     method: 'POST',
@@ -1691,8 +1738,10 @@
                 }
                 const response = await fetch(`${apiBase}/tasks/${encodeURIComponent(taskId)}/approve`, options);
                 const data = await parseJsonSafe(response);
+                processingTasks.delete(taskId);
                 if (!response.ok) {
                     setSyncState(false, 'Synced');
+                    renderFilteredTasks();
                     showBanner(extractErrorMessage(data, `Action failed (HTTP ${response.status}).`), 'error');
                     if (data.error === 'scope_upgrade_required') {
                         await fetchCapabilities();
@@ -1703,15 +1752,19 @@
                 showBanner(data.message || 'Action completed successfully.', 'success');
                 return true;
             } catch (error) {
+                processingTasks.delete(taskId);
                 setSyncState(false, 'Synced');
+                renderFilteredTasks();
                 showBanner('Failed to execute action: ' + error.message, 'error');
                 return false;
             }
         }
 
         async function rejectTask(taskId) {
+            if (processingTasks.has(taskId)) return false;
+            processingTasks.set(taskId, { mode: 'reject', label: 'Rejecting...' });
             hideBanner();
-            setSyncState(true, 'Archiving...');
+            setSyncState(true, 'Rejecting...');
             try {
                 const response = await fetch(`${apiBase}/tasks/${encodeURIComponent(taskId)}/reject`, {
                     method: 'POST',
@@ -1720,8 +1773,10 @@
                     body: JSON.stringify({ mark_read_and_move: true }),
                 });
                 const data = await parseJsonSafe(response);
+                processingTasks.delete(taskId);
                 if (!response.ok) {
                     setSyncState(false, 'Synced');
+                    renderFilteredTasks();
                     showBanner(data.message || 'Failed to reject task.', 'error');
                     return false;
                 }
@@ -1729,7 +1784,9 @@
                 showBanner(data.message || 'Task rejected and archived.', 'info');
                 return true;
             } catch (error) {
+                processingTasks.delete(taskId);
                 setSyncState(false, 'Synced');
+                renderFilteredTasks();
                 showBanner('Failed to reject task: ' + error.message, 'error');
                 return false;
             }
