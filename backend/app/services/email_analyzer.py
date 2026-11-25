@@ -357,8 +357,15 @@ def _sanitize_analysis_payload(
 
 
 _FALLBACK_GEMINI_MODELS = (
+    "gemini-4-hydrogen",
+    "gemini-3.1-flash-lite",
+    "gemini-4-argon",
+    "gemini-4-neon",
+    "gemini-3-flash-preview",
+    "gemini-3.1-pro-preview",
+    "gemini-3.1-flash-lite-preview",
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
+    "gemini-2.5-pro",
     "gemini-2.5-flash-lite",
 )
 
@@ -823,7 +830,7 @@ def analyze_email_with_gemini(
         )
     if response.status_code == 404:
         raise EmailAnalysisApiError(
-            f"Gemini model '{used_model}' was not found (404). Set GEMINI_MODEL=gemini-2.5-flash in backend/.env.",
+            f"Gemini model '{used_model}' was not found (404). Set GEMINI_MODEL=gemini-4-hydrogen in backend/.env.",
             status_code=404,
         )
     if response.status_code == 429:
