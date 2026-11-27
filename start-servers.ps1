@@ -82,8 +82,9 @@ public static class ServerJob
 Write-Host "Starting frontend on port $FrontendPort and backend on port $BackendPort."
 Write-Host 'Press Ctrl+C or close this window to stop both servers.'
 
-$frontend = Start-Process -FilePath $python -ArgumentList "-m http.server $FrontendPort" `
-    -WorkingDirectory (Join-Path $PSScriptRoot '.open-design') -NoNewWindow -PassThru
+$frontendScript = Join-Path $PSScriptRoot 'serve_frontend.py'
+$frontend = Start-Process -FilePath $python -ArgumentList "`"$frontendScript`" $FrontendPort" `
+    -WorkingDirectory $PSScriptRoot -NoNewWindow -PassThru
 $backend = Start-Process -FilePath $python -ArgumentList "-m uvicorn main:app --host 0.0.0.0 --port $BackendPort" `
     -WorkingDirectory (Join-Path $PSScriptRoot 'backend') -NoNewWindow -PassThru
 

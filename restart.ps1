@@ -18,21 +18,20 @@ Start-Sleep -Seconds 2
 
 # Start UI server
 Write-Host "`nStarting UI server on port 3000..." -ForegroundColor Yellow
-Push-Location C:\Users\bhaga\Desktop\joshu\.open-design
-Start-Process python -ArgumentList "-m http.server 3000" -WindowStyle Hidden
-Pop-Location
+$frontendScript = Join-Path $PSScriptRoot 'serve_frontend.py'
+Start-Process python -ArgumentList "`"$frontendScript`" 3000" -WorkingDirectory $PSScriptRoot -WindowStyle Hidden
 
 Start-Sleep -Seconds 2
 
 # Start backend  
 Write-Host "Starting backend on port 8000..." -ForegroundColor Yellow
-Push-Location C:\Users\bhaga\Desktop\joshu\backend
+Push-Location (Join-Path $PSScriptRoot 'backend')
 Start-Process python -ArgumentList "-m uvicorn main:app --host 0.0.0.0 --port 8000" -WindowStyle Hidden
 Pop-Location
 
 Start-Sleep -Seconds 3
 
 Write-Host "`n✅ Application restarted!" -ForegroundColor Green
-Write-Host "   📱 UI: http://localhost:3000/auth.html" -ForegroundColor Cyan
+Write-Host "   📱 UI: http://localhost:3000" -ForegroundColor Cyan
 Write-Host "   🔙 Backend: http://localhost:8000" -ForegroundColor Cyan
 Write-Host "`n💡 Tip: Run this script anytime you need to restart the servers" -ForegroundColor Magenta

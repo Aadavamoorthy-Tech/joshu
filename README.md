@@ -255,7 +255,7 @@ You can also specify custom ports via `start-servers.ps1`:
 .\start-servers.ps1 -FrontendPort 3000 -BackendPort 8000
 ```
 
-Then open **`http://localhost:3000/auth.html`** in your browser.
+Then open **`http://localhost:3000`** in your browser.
 
 ### Option B: Manual Terminal Startup
 
@@ -269,11 +269,10 @@ cd backend
 **Terminal 2 — Frontend UI (Port 3000):**
 
 ```powershell
-cd .open-design
-..\.venv\Scripts\python.exe -m http.server 3000
+.\.venv\Scripts\python.exe serve_frontend.py 3000
 ```
 
-Open **`http://localhost:3000/auth.html`** in your browser (and verify backend health at `http://localhost:8000/health`).
+Open **`http://localhost:3000`** in your browser (and verify backend health at `http://localhost:8000/health`).
 
 ---
 
