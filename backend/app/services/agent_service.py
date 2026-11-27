@@ -39,11 +39,11 @@ logger = logging.getLogger("joshu.agent_service")
 RUNTIME_RULES_PATH = Path(__file__).resolve().parent / "agent_runtime_rules.py"
 _SAFE_CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 _FALLBACK_GEMINI_MODELS: Tuple[str, ...] = (
-    "gemini-4-hydrogen",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+    "gemini-2.5-pro",
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
+    "gemini-4-hydrogen",
 )
 
 
@@ -635,8 +635,22 @@ def _call_gemini_agent_brain(
     if not api_key:
         return None
 
+    # Include balanced coverage across pending, approved, and rejected tasks (up to 60 total)
+    # so Gemini can accurately answer queries about any status.
+    selected_tasks: List[Task] = []
+    per_status_limit = {"pending": 25, "approved": 20, "rejected": 20}
+    status_counts_added = {"pending": 0, "approved": 0, "rejected": 0}
+    for t in tasks:
+        st = (t.status or "pending").lower()
+        limit = per_status_limit.get(st, 10)
+        if status_counts_added.get(st, 0) < limit:
+            selected_tasks.append(t)
+            status_counts_added[st] = status_counts_added.get(st, 0) + 1
+        if len(selected_tasks) >= 60:
+            break
+
     task_summaries = []
-    for t in tasks[:25]:
+    for t in selected_tasks:
         raw = t.raw_data if isinstance(t.raw_data, dict) else {}
         ai = raw.get("ai_analysis") if isinstance(raw.get("ai_analysis"), dict) else {}
         pay = ai.get("payment") if isinstance(ai.get("payment"), dict) else {}
@@ -647,9 +661,13 @@ def _call_gemini_agent_brain(
                 "status": t.status,
                 "category": ai.get("category") or t.source,
                 "sender": raw.get("organizer"),
+                "summary": ai.get("summary") or "",
                 "payment_amount": pay.get("amount"),
                 "payment_currency": pay.get("currency") or "INR",
                 "scheduled_for": _format_utc(t.scheduled_for),
+                "rejected_at": _format_utc(t.rejected_at),
+                "rejection_reason": t.rejection_reason,
+                "approved_at": _format_utc(t.approved_at),
             }
         )
 
@@ -658,8 +676,18 @@ def _call_gemini_agent_brain(
         for m in recent_messages[-6:]
     ]
 
+    total_counts = {
+        "total": len(tasks),
+        "pending": sum(1 for t in tasks if t.status == "pending"),
+        "approved": sum(1 for t in tasks if t.status == "approved"),
+        "rejected": sum(1 for t in tasks if t.status == "rejected"),
+    }
+
     system_prompt = (
         "You are Joshu Agent, the autonomous AI Chief of Staff inside the Joshu application with FULL CONTROL over the application.\n"
+        "Answer ONLY what the user actually asked — directly, accurately, and concisely using the Workspace Tasks data provided below.\n"
+        "If the user asks about a specific subset of emails/tasks (for example, rejected emails, approved emails, bills, meetings, or emails from a specific sender), "
+        "return ONLY the matching items (or clearly state that there are none). Do NOT list unrelated pending bills/meetings or generic help menus unless the user asks for an overview or help.\n"
         "You can execute actions directly by returning a JSON object with `reply` (markdown-free plain text or clean bullet points) and `tool_calls` (a list of tool invocations).\n\n"
         "Available tools you can include in `tool_calls`:\n"
         '1. `{"tool": "set_auto_payment_rule", "enabled": true|false, "max_amount": <number>, "currency": "INR"}` — '
@@ -680,11 +708,12 @@ def _call_gemini_agent_brain(
         '11. `{"tool": "remember_note", "note": "<persistent instruction>"}` — Saves a persistent memory note.\n'
         '12. `{"tool": "clear_memory"}` — Clears saved memory notes.\n\n'
         "Return ONLY valid JSON matching:\n"
-        '{"reply": "Clear explanation of what you did or found", "tool_calls": [ ... ]}\n\n'
+        '{"reply": "Clear, direct answer to the user prompt", "tool_calls": [ ... ]}\n\n'
         f"Current User: {user.name} <{user.email}>\n"
         f"Current Policy: {json.dumps(serialize_agent_policy(policy))}\n"
         f"Google Services Status: {json.dumps(services)}\n"
-        f"Workspace Tasks ({len(tasks)} total): {json.dumps(task_summaries)}\n"
+        f"Task Status Counts: {json.dumps(total_counts)}\n"
+        f"Workspace Tasks ({len(task_summaries)} shown of {len(tasks)} total): {json.dumps(task_summaries)}\n"
         f"Recent Conversation:\n" + "\n".join(history_lines) + "\n\n"
         f"User Prompt: {user_message}"
     )
@@ -708,12 +737,15 @@ def _call_gemini_agent_brain(
         try:
             resp = requests.post(
                 endpoint,
-                params={"key": api_key},
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": api_key,
+                },
                 json=payload,
                 timeout=15,
             )
             if resp.status_code != 200:
+                logger.warning("Gemini agent model %s returned HTTP %s", model_name, resp.status_code)
                 continue
             body = resp.json()
             candidates = body.get("candidates") or []
@@ -881,6 +913,155 @@ def _build_deterministic_tool_calls(user_message: str) -> List[Dict[str, Any]]:
             calls.append({"tool": "remember_note", "note": remember_match.group(1).strip()})
 
     return calls
+
+
+_QUERY_STOPWORDS = {
+    "a", "an", "the", "my", "me", "i", "we", "you", "your", "our", "all", "any",
+    "show", "list", "get", "find", "search", "view", "see", "tell", "give", "display", "check",
+    "what", "which", "who", "where", "when", "how", "many", "much", "count", "number",
+    "are", "is", "was", "were", "have", "has", "had", "do", "does", "did", "can", "could", "would", "please",
+    "mail", "mails", "email", "emails", "message", "messages", "inbox", "task", "tasks", "item", "items",
+    "that", "those", "these", "this", "in", "on", "of", "to", "for", "with", "about", "from", "by", "been",
+    "rejected", "reject", "declined", "dismissed",
+    "approved", "approve", "accepted", "completed", "paid",
+    "pending", "unreviewed", "waiting", "unread", "open",
+    "bill", "bills", "payment", "payments", "invoice", "invoices", "due",
+    "meeting", "meetings", "calendar", "invite", "invites", "rsvp", "appointment", "appointments",
+    "reply", "replies", "respond", "response", "responses",
+    "informational", "newsletter", "newsletters", "receipt", "receipts", "alert", "alerts", "security",
+    "recent", "latest", "last", "today", "currently", "right", "now",
+}
+
+_GENERAL_OVERVIEW_PHRASES = (
+    "hi", "hello", "hey", "help", "what can you do", "overview", "summary", "status", "dashboard",
+)
+
+
+def _answer_workspace_query(
+    user_message: str,
+    all_tasks: List[Task],
+    policy: AgentPolicy,
+) -> Optional[str]:
+    """Deterministically answer specific questions about the user's emails/tasks (rejected, approved, pending, bills, meetings, search)."""
+    msg = (user_message or "").strip()
+    lower = msg.lower()
+    words = re.findall(r"[a-z0-9@._\-]+", lower)
+    word_set = set(words)
+
+    if lower.rstrip("?!.") in _GENERAL_OVERVIEW_PHRASES:
+        return None
+
+    status_filter: Optional[str] = None
+    if word_set & {"rejected", "reject", "declined", "dismissed"}:
+        status_filter = "rejected"
+    elif word_set & {"approved", "accepted", "completed", "paid"}:
+        status_filter = "approved"
+    elif word_set & {"pending", "unreviewed", "waiting", "unread", "open"}:
+        status_filter = "pending"
+
+    category_filter: Optional[str] = None
+    if word_set & {"bill", "bills", "payment", "payments", "invoice", "invoices", "emi"}:
+        category_filter = "payment_request"
+    elif word_set & {"meeting", "meetings", "calendar", "invite", "invites", "rsvp", "appointment", "appointments"}:
+        category_filter = "meeting"
+    elif word_set & {"reply", "replies", "respond", "response", "responses"}:
+        category_filter = "reply_needed"
+    elif word_set & {"informational", "newsletter", "newsletters", "receipt", "receipts", "security", "alert", "alerts"}:
+        category_filter = "informational"
+
+    mentions_workspace = bool(
+        status_filter
+        or category_filter
+        or (word_set & {"mail", "mails", "email", "emails", "message", "messages", "inbox", "task", "tasks"})
+    )
+    if not mentions_workspace:
+        return None
+
+    search_terms = [w for w in words if len(w) >= 2 and w not in _QUERY_STOPWORDS]
+
+    matched: List[Task] = []
+    for t in all_tasks:
+        if status_filter and (t.status or "").lower() != status_filter:
+            continue
+
+        raw = t.raw_data if isinstance(t.raw_data, dict) else {}
+        ai = raw.get("ai_analysis") if isinstance(raw.get("ai_analysis"), dict) else {}
+        cat = str(ai.get("category") or ("meeting_invite" if t.source == "calendar" else "informational")).lower()
+
+        if category_filter == "payment_request":
+            if not (ai.get("requires_payment") or cat == "payment_request"):
+                continue
+        elif category_filter == "meeting":
+            if not (ai.get("requires_calendar") or t.source == "calendar" or cat in ("meeting_invite", "meeting_rsvp")):
+                continue
+        elif category_filter == "reply_needed":
+            if not (ai.get("requires_reply") or ai.get("requires_rsvp") or cat == "reply_needed"):
+                continue
+        elif category_filter == "informational":
+            if cat != "informational":
+                continue
+
+        if search_terms:
+            haystack = " ".join(
+                [
+                    str(t.title or ""),
+                    str(raw.get("organizer") or ""),
+                    str(ai.get("summary") or ""),
+                    str(t.description or "")[:400],
+                ]
+            ).lower()
+            if not all(term in haystack for term in search_terms):
+                continue
+
+        matched.append(t)
+
+    # Build human-readable label describing exactly what was queried
+    cat_labels = {
+        "payment_request": "bill/payment emails",
+        "meeting": "meeting/calendar emails",
+        "reply_needed": "emails needing a reply",
+        "informational": "informational emails",
+    }
+    item_label = cat_labels.get(category_filter, "emails")
+    if status_filter:
+        descriptor = f"{status_filter} {item_label}"
+    else:
+        descriptor = item_label
+    if search_terms:
+        descriptor = f"{descriptor} matching '{' '.join(search_terms)}'"
+
+    if not matched:
+        return f"You currently have no {descriptor}."
+
+    lines = [f"You have {len(matched)} {descriptor}:"]
+    for idx, t in enumerate(matched[:25], start=1):
+        raw = t.raw_data if isinstance(t.raw_data, dict) else {}
+        ai = raw.get("ai_analysis") if isinstance(raw.get("ai_analysis"), dict) else {}
+        sender = str(raw.get("organizer") or "").strip()
+        sender_clean = sender.split("<")[0].strip().strip('"') if sender else ""
+        pay = ai.get("payment") if isinstance(ai.get("payment"), dict) else {}
+        amt = pay.get("amount")
+        cur = pay.get("currency") or "INR"
+
+        details: List[str] = []
+        if sender_clean:
+            details.append(f"From: {sender_clean}")
+        if ai.get("requires_payment") and amt:
+            details.append(f"Amount: {amt} {cur}")
+        if not status_filter:
+            details.append(f"Status: {t.status}")
+        if t.status == "rejected" and t.rejection_reason:
+            details.append(f"Reason: {t.rejection_reason}")
+        elif t.scheduled_for:
+            details.append(f"Date: {t.scheduled_for.strftime('%b %d, %Y')}")
+
+        detail_str = f" ({' · '.join(details)})" if details else ""
+        lines.append(f"{idx}. {t.title or '(No Subject)'}{detail_str}")
+
+    if len(matched) > 25:
+        lines.append(f"...and {len(matched) - 25} more.")
+
+    return "\n".join(lines)
 
 
 def process_agent_chat(
@@ -1345,36 +1526,42 @@ def process_agent_chat(
     elif ai_reply:
         final_reply = ai_reply
     else:
-        # Comprehensive deterministic workspace overview when asked general questions and Gemini quota is exhausted
-        pending_list = [t for t in all_tasks if t.status == "pending"]
-        approved_list = [t for t in all_tasks if t.status == "approved"]
-        pay_tasks = []
-        meet_tasks = []
-        for t in pending_list:
-            raw = t.raw_data if isinstance(t.raw_data, dict) else {}
-            ai = raw.get("ai_analysis") if isinstance(raw.get("ai_analysis"), dict) else {}
-            if ai.get("requires_payment"):
-                amt = (ai.get("payment") or {}).get("amount")
-                pay_tasks.append(f"{t.title} (₹{amt})" if amt else t.title)
-            elif ai.get("requires_calendar") or t.source == "calendar":
-                meet_tasks.append(t.title)
+        direct_query_reply = _answer_workspace_query(cleaned_msg, all_tasks, policy)
+        if direct_query_reply:
+            final_reply = direct_query_reply
+        else:
+            # Comprehensive deterministic workspace overview when asked general/help questions
+            pending_list = [t for t in all_tasks if t.status == "pending"]
+            approved_list = [t for t in all_tasks if t.status == "approved"]
+            rejected_list = [t for t in all_tasks if t.status == "rejected"]
+            pay_tasks = []
+            meet_tasks = []
+            for t in pending_list:
+                raw = t.raw_data if isinstance(t.raw_data, dict) else {}
+                ai = raw.get("ai_analysis") if isinstance(raw.get("ai_analysis"), dict) else {}
+                if ai.get("requires_payment"):
+                    amt = (ai.get("payment") or {}).get("amount")
+                    pay_tasks.append(f"{t.title} (₹{amt})" if amt else t.title)
+                elif ai.get("requires_calendar") or t.source == "calendar":
+                    meet_tasks.append(t.title)
 
-        rule_desc = (
-            f"Auto-Pay enabled for bills <= ₹{policy.auto_pay_max_amount:.2f} {policy.auto_pay_currency}"
-            if policy.auto_pay_enabled
-            else "Auto-Pay currently off"
-        )
-        final_reply = (
-            f"You currently have {len(pending_list)} pending tasks and {len(approved_list)} approved tasks ({rule_desc}).\n"
-            + (f"• Pending Bills ({len(pay_tasks)}): {', '.join(pay_tasks[:5])}\n" if pay_tasks else "")
-            + (f"• Pending Meetings ({len(meet_tasks)}): {', '.join(meet_tasks[:5])}\n" if meet_tasks else "")
-            + "\nYou can ask me to:\n"
-            "• \"Make all payments under 1000 rs automatically without asking\"\n"
-            "• \"Automatically archive all informational emails\"\n"
-            "• \"Connect Google Drive\" (or Google Sheets, Docs, Contacts, Tasks, Meet)\n"
-            "• \"Approve the Water Utility Bill\" or \"Reject the Gym Membership\"\n"
-            "• \"Send an email to colleague@example.com with subject ...\""
-        )
+            rule_desc = (
+                f"Auto-Pay enabled for bills <= ₹{policy.auto_pay_max_amount:.2f} {policy.auto_pay_currency}"
+                if policy.auto_pay_enabled
+                else "Auto-Pay currently off"
+            )
+            final_reply = (
+                f"You currently have {len(pending_list)} pending, {len(approved_list)} approved, and {len(rejected_list)} rejected tasks ({rule_desc}).\n"
+                + (f"• Pending Bills ({len(pay_tasks)}): {', '.join(pay_tasks[:5])}\n" if pay_tasks else "")
+                + (f"• Pending Meetings ({len(meet_tasks)}): {', '.join(meet_tasks[:5])}\n" if meet_tasks else "")
+                + "\nYou can ask me to:\n"
+                "• \"Show me the mails I rejected\" (or approved/pending mails, bills, or meetings)\n"
+                "• \"Make all payments under 1000 rs automatically without asking\"\n"
+                "• \"Automatically archive all informational emails\"\n"
+                "• \"Connect Google Drive\" (or Google Sheets, Docs, Contacts, Tasks, Meet)\n"
+                "• \"Approve the Water Utility Bill\" or \"Reject the Gym Membership\"\n"
+                "• \"Send an email to colleague@example.com with subject ...\""
+            )
 
     stored_actions = list(actions_taken) + [{"_chat_id": effective_chat_id}]
     agent_msg_record = AgentMessage(

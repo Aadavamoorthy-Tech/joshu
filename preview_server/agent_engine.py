@@ -327,18 +327,23 @@ def process_preview_agent_chat(
             "Here are the Google Workspace services you can connect to Joshu. Click any service chip below to authorize it."
         )
 
-    # 4. General response (Gemini API via stdlib urllib if configured, else intelligent summary)
+    # 4. General response (Gemini API via stdlib urllib if configured, else smart workspace query resolver)
     if not reply_parts:
         gemini_reply = _call_gemini_stdlib(session, user_prompt)
         if gemini_reply:
             reply_parts.append(gemini_reply)
         else:
-            pending_count = sum(1 for t in session.tasks if t.get("status") == "pending")
-            approved_count = sum(1 for t in session.tasks if t.get("status") == "approved")
-            reply_parts.append(
-                f"I am your Joshu Agent with full control over this application. Right now you have {pending_count} pending task(s) and {approved_count} approved task(s). "
-                "You can tell me to automate payments under a specific amount (e.g., 'Make all payments under 1000 Rs automatically without asking'), connect additional Google services (Drive, Sheets, Docs, Contacts, Tasks, Meet), or manage your inbox tasks."
-            )
+            query_reply = _answer_preview_workspace_query(session, user_prompt)
+            if query_reply:
+                reply_parts.append(query_reply)
+            else:
+                pending_count = sum(1 for t in session.tasks if t.get("status") == "pending")
+                approved_count = sum(1 for t in session.tasks if t.get("status") == "approved")
+                rejected_count = sum(1 for t in session.tasks if t.get("status") == "rejected")
+                reply_parts.append(
+                    f"I am your Joshu Agent with full control over this application. Right now you have {pending_count} pending, {approved_count} approved, and {rejected_count} rejected task(s). "
+                    "You can ask me to show rejected/approved/pending emails, automate payments under a specific amount (e.g., 'Make all payments under 1000 Rs automatically without asking'), connect additional Google services (Drive, Sheets, Docs, Contacts, Tasks, Meet), or manage your inbox tasks."
+                )
 
     now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     next_id = len(session.agent_messages) + 1
@@ -371,17 +376,53 @@ def process_preview_agent_chat(
     }
 
 
+def _answer_preview_workspace_query(session: Any, user_prompt: str) -> Optional[str]:
+    lower = (user_prompt or "").lower().strip()
+    words = re.findall(r"[a-z0-9@._\-]+", lower)
+    word_set = set(words)
+
+    status_filter: Optional[str] = None
+    if word_set & {"rejected", "reject", "declined", "dismissed"}:
+        status_filter = "rejected"
+    elif word_set & {"approved", "accepted", "completed", "paid"}:
+        status_filter = "approved"
+    elif word_set & {"pending", "unreviewed", "waiting", "unread", "open"}:
+        status_filter = "pending"
+
+    if not status_filter and not (word_set & {"mail", "mails", "email", "emails", "task", "tasks", "bill", "bills", "meeting", "meetings"}):
+        return None
+
+    matched = [
+        t for t in session.tasks
+        if not status_filter or str(t.get("status") or "").lower() == status_filter
+    ]
+    label = f"{status_filter} emails" if status_filter else "emails"
+    if not matched:
+        return f"You currently have no {label}."
+    lines = [f"You have {len(matched)} {label}:"]
+    for idx, t in enumerate(matched[:25], start=1):
+        sender = str(t.get("organizer") or "").split("<")[0].strip().strip('"')
+        suffix = f" (From: {sender})" if sender else ""
+        lines.append(f"{idx}. {t.get('title') or '(No Subject)'}{suffix}")
+    return "\n".join(lines)
+
+
 def _call_gemini_stdlib(session: Any, user_prompt: str) -> Optional[str]:
     api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
     if not api_key or api_key.upper().startswith(("YOUR_", "REPLACE_", "<")):
         return None
 
-    pending = [t.get("title") for t in session.tasks if t.get("status") == "pending"][:10]
+    pending = [t.get("title") for t in session.tasks if t.get("status") == "pending"][:15]
+    approved = [t.get("title") for t in session.tasks if t.get("status") == "approved"][:15]
+    rejected = [t.get("title") for t in session.tasks if t.get("status") == "rejected"][:15]
     system_text = (
         "You are Joshu Agent, an autonomous AI Chief of Staff inside the Joshu application with full control over tasks, "
         "autonomous payment/inbox policies, and Google Workspace integrations. "
-        f"Signed-in user: {session.email}. Pending tasks ({len(pending)}): {', '.join(str(x) for x in pending if x) or 'None'}. "
-        "Respond concisely and helpfully."
+        "Answer ONLY what the user asked directly and accurately using the task lists below. "
+        f"Signed-in user: {session.email}. "
+        f"Pending tasks ({len(pending)}): {', '.join(str(x) for x in pending if x) or 'None'}. "
+        f"Approved tasks ({len(approved)}): {', '.join(str(x) for x in approved if x) or 'None'}. "
+        f"Rejected tasks ({len(rejected)}): {', '.join(str(x) for x in rejected if x) or 'None'}."
     )
     payload = {
         "system_instruction": {"parts": [{"text": system_text}]},
